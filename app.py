@@ -19,7 +19,7 @@ import itertools
 import operator
 import plotly.express as px
 from network_control.utils import matrix_normalization
-from network_control.energies import minimum_energy,optimal_energy
+from network_control.energies import minimum_input,optimal_input
 from nct_utils import state_trajectory
 
 ###############################################################################
@@ -242,7 +242,7 @@ def get_state_trajectory_fig(A,x0,T,c):
 def get_minimum_energy_figure(A,T,B,x0,xf,c):
             
     # compute minimum energy
-    x,u,n_err = minimum_energy(A,T,B,x0,xf)
+    x,u,n_err = minimum_input(A,T,B,x0,xf)
     
     # create figure (FIXME: could the following be shorted?)
     x_df = pd.DataFrame(x).reset_index().rename(columns={'index':'t'})
@@ -263,7 +263,7 @@ def get_minimum_energy_figure(A,T,B,x0,xf,c):
 def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
             
     # compute optimal energy
-    x,u,n_err = optimal_energy(A,T,B,x0,xf,rho,S)
+    x,u,n_err = optimal_input(A,T,B,x0,xf,rho,S)
     
     # create figure (FIXME: could the following be shorted?)
     x_df = pd.DataFrame(x).reset_index().rename(columns={'index':'t'})
