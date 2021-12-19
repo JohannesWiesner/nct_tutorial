@@ -372,11 +372,11 @@ app.layout = html.Div([
     dash_table.DataTable(
         id='states-table',
         columns=[{'id':'index','name':'index','type':'numeric'},
-                 {'id':'x0','name':'x0','type':'numeric'},
-                 {'id':'xf','name':'xf','type':'numeric'}
+                 {'id':'x0','name':'x0','type':'numeric','editable':True},
+                 {'id':'xf','name':'xf','type':'numeric','editable':True}
                  ],
         data=states_df.to_dict('records'),
-        editable=True
+        editable=False,
         )
     ],style={'display':'inline-block','width':'25%','verticalAlign':'top'}),
     # all control elements are placed in one container
