@@ -42,7 +42,8 @@ A = np.array([[0, 1, 2, 1, 0, 0, 0, 0, 0],
               [0, 0, 0, 0, 0, 0, 1, 1, 0]])
 
 # create default (random) x0 and xf (between 0 and 1)
-states_df = pd.DataFrame({'x0':np.random.rand(len(A)),'xf':np.random.rand(len(A))})
+states_df = pd.DataFrame({'x0':np.round(np.random.rand(len(A)),2),'xf':np.round(np.random.rand(len(A)),2)})
+states_df.reset_index(inplace=True)
 
 ###############################################################################
 ## Dash App ###################################################################
@@ -371,7 +372,10 @@ app.layout = html.Div([
     # x0/xf data table
     dash_table.DataTable(
         id='states-table',
-        columns=[{'id':'x0','name':'x0','type':'numeric'},{'id':'xf','name':'xf','type':'numeric'}],
+        columns=[{'id':'index','name':'index','type':'numeric'},
+                 {'id':'x0','name':'x0','type':'numeric'},
+                 {'id':'xf','name':'xf','type':'numeric'}
+                 ],
         data=states_df.to_dict('records'),
         editable=True
     )]),
@@ -446,6 +450,7 @@ def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,se
     # add or delete edges
     if button_id == 'edge-button':
         
+        # FIXME: Is that true? Couldn't we merge add_edges and drop_edges?
         # user must exclusively selecte either at least two nodes or one edge 
         # but not both nodes and edges at the same time
         if len(selectedNodeData) > 0 and len(selectedEdgeData) > 0:
