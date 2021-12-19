@@ -15,6 +15,7 @@ import dash_html_components as html
 from dash.dependencies import Input, Output, State
 import dash_core_components as dcc
 import dash_table
+import dash_daq as daq
 import itertools
 import operator
 import plotly.express as px
@@ -30,12 +31,12 @@ from nct_utils import state_trajectory
 np.random.seed(28)
 
 # create a default adjacency matrix
-A = np.array([[0, 1, 1, 1, 0, 0, 0, 0, 0],
-              [1, 0, 0, 1, 0, 0, 0, 0, 0],
-              [1, 0, 0, 1, 0, 0, 0, 0, 0],
-              [1, 1, 1, 0, 1, 0, 0, 0, 0],
-              [0, 0, 0, 1, 0, 1, 0, 0, 0],
-              [0, 0, 0, 0, 1, 0, 1, 1, 0],
+A = np.array([[0, 1, 2, 1, 0, 0, 0, 0, 0],
+              [1, 0, 0, 3, 0, 0, 0, 0, 0],
+              [2, 0, 0, 4, 0, 0, 0, 0, 0],
+              [1, 3, 4, 0, 5, 0, 0, 0, 0],
+              [0, 0, 0, 5, 0, 6, 0, 0, 0],
+              [0, 0, 0, 0, 6, 0, 1, 1, 0],
               [0, 0, 0, 0, 0, 1, 0, 1, 1],
               [0, 0, 0, 0, 0, 1, 1, 0, 1],
               [0, 0, 0, 0, 0, 0, 1, 1, 0]])
@@ -122,7 +123,7 @@ def get_node_dicts(elements):
             
     return node_dicts
 
-def add_edges(selectedNodeData,elements):
+def add_edges(selectedNodeData,edge_weight,elements):
     '''For each combination of selected nodes, check if this combination is connected 
     by an edge. If not, create an edge dict for that combination and modify the elements list'''
     
@@ -141,13 +142,9 @@ def add_edges(selectedNodeData,elements):
     
     # for each source and target tuple, check if this edge already exists. If not,
     # create a new edge dict and add it to elements
-    # NOTE: Currently, new edges always get a default weight of 1. This could/should
-    # be fixed (either by adding an entry field where user can select
-    # weight strength when creating the new edges or by allowing user to modify
-    # edge strength post-hoc after edge is created)
     for (source,target) in source_and_target_ids:
         if not (source,target) in edge_ids:
-              new_edge = {'data':{'weight':1.0,'source':source,'target':target}}
+              new_edge = {'data':{'weight':edge_weight,'source':source,'target':target}}
               elements.append(new_edge)
     
     return elements
@@ -173,6 +170,53 @@ def drop_edges(selectedEdgeData,elements):
     
     return elements
 
+def get_edge_min_max(elements):
+    '''Get minimum and maximum edge weights'''
+    
+    # get all edges from elements
+    edge_dicts = get_edge_dicts(elements)
+    
+    # find minimum and maximum weights
+    edge_weights = [d['data']['weight'] for d in edge_dicts]
+    weights_max = max(edge_weights)
+    weights_min = min(edge_weights)
+
+    return weights_min,weights_max
+
+# FIXME: Delete this function if it's not necessary
+def set_edge_width(elements,edge_weight):
+    '''Return the edge width for a single edge'''
+    
+    weights_min,weights_max = get_edge_min_max(elements)
+    
+    min_width = 1 # constant (selected by me)
+    max_width = 10 # constant (selected by me)
+    edge_width = min_width + ((max_width - min_width) / (weights_max - weights_min)) * (edge_weight - weights_min)
+
+    return edge_width
+
+def set_edge_weights(selectedEdgeData,edge_weight,elements):
+    '''Modify the weights of the selected edges'''
+    
+    # get source and target ids for all currently selected edges
+    source_and_target_ids = [(d['source'],d['target']) for d in selectedEdgeData]
+    
+    # iterate over all dictionaries in elements, identify edge dicts by their
+    # 'weight' key and check again if this edge dict belongs to the currently selected
+    # edges. If yes, add its index to list of to be dropped dictionaires.
+    modify_these_dicts = []
+    
+    for idx,d in enumerate(elements):
+        if 'weight' in d['data']:
+            if (d['data']['source'],d['data']['target']) in source_and_target_ids:
+                modify_these_dicts.append(idx)
+                    
+    # drop selected edge dictionaries from elements
+    for i in modify_these_dicts:
+        elements[i]['data']['weight'] = edge_weight
+        
+    return elements
+
 ## Figure Plotting ###########################################################
 
 def from_elements_to_A(elements):
@@ -180,7 +224,7 @@ def from_elements_to_A(elements):
     adjacency matrix
     '''
 
-    # FIXME: This is inefficient, we iterate over the same list twice
+    # FIXME: This is inefficient, we iterate over the same list twice (see #8)
     edge_dicts = get_edge_dicts(elements)
     node_dicts = get_node_dicts((elements))
     
@@ -238,6 +282,7 @@ def get_state_trajectory_fig(A,x0,T,c):
     
     return fig
 
+# FIXME: Plotting speed could probably bee optimized, take a look in niplot module
 # TO-DO: n_err should also be visualized somewhere
 def get_minimum_energy_figure(A,T,B,x0,xf,c):
             
@@ -259,6 +304,7 @@ def get_minimum_energy_figure(A,T,B,x0,xf,c):
     
     return fig
 
+# FIXME: Plotting speed could probably bee optimized, take a look in niplot module
 # TO-DO: n_err should also be visualized somewhere
 def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
             
@@ -279,7 +325,7 @@ def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
     fig.update_layout(title='Optimal Control Energy',title_x=0.5)
     
     return fig
-    
+
 ###############################################################################
 ## Dash App ###################################################################
 ###############################################################################
@@ -287,19 +333,9 @@ def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
 # run dash and take in the list of elements
 app = dash.Dash(__name__)
 
-app.layout = html.Div([
-    html.Div([
-        
-    # cytoscape graph
-    cyto.Cytoscape(
-        id='cytoscape-compound',
-        layout={'name':'cose'},
-        style={'width':'50%', 'height':'500px'},
-        elements=from_A_to_elements(A), # initialize elements with a function call
-        selectedNodeData=[],
-        selectedEdgeData=[],
-        stylesheet=[
-            # Add show node labels
+# create custom style sheet
+stylesheet = [
+            # Show the labels of the nodes
             {
                 'selector': 'node',
                 'style': {
@@ -314,23 +350,41 @@ app.layout = html.Div([
                     'border-color': 'black'
                 }
             }
+            
         ]
+
+app.layout = html.Div([
+    html.Div([
+        
+    # cytoscape graph
+    cyto.Cytoscape(
+        id='cytoscape-compound',
+        layout={'name':'cose'},
+        style={'width':'50%', 'height':'500px'},
+        elements=from_A_to_elements(A), # initialize elements with a function call
+        selectedNodeData=[],
+        selectedEdgeData=[],
+        stylesheet=stylesheet
     ),
     
+    # FIXME: Add an index column
     # x0/xf data table
     dash_table.DataTable(
         id='states-table',
-        columns=[{'id': 'x0','name':'x0','type':'numeric'},{'id':'xf','name':'xf','type':'numeric'}],
+        columns=[{'id':'x0','name':'x0','type':'numeric'},{'id':'xf','name':'xf','type':'numeric'}],
         data=states_df.to_dict('records'),
         editable=True
     )]),
     
     # topology control elements
     html.Div([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0),
-              html.Button('(Un-)set controll',id='controll-button',n_clicks=0)]
-             ),
+              html.Button('(Un-)set controll',id='controll-button',n_clicks=0),
+             dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1),
+             html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)
+             ]),
+    
     # network control elements
-    html.Div([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=20),
+    html.Div([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3),
               dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1),
               dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1),
               html.Button('Plot Trajectories',id='plot-button',n_clicks=0)
@@ -345,7 +399,8 @@ app.layout = html.Div([
     html.Div([
     html.Pre(id='selected-node-data-json-output'),
     html.Pre(id='selected-edge-data-json-output'),
-    html.Pre(id='current-elements')
+    html.Pre(id='current-elements'),
+    html.Pre(id='current-stylesheet')
     ])
 ])
 
@@ -366,17 +421,23 @@ def displaySelectedEdgeData(data):
 def displayCurrentElements(elements):
     return json.dumps(elements,indent=2)
 
+@app.callback(Output('current-stylesheet','children'),
+              Input('cytoscape-compound','stylesheet'))
+def displayCurrentStylesheet(elements):
+    return json.dumps(elements,indent=2)
+
 ## Callback Functions #########################################################
 
 @app.callback(Output('cytoscape-compound','elements'),
               Input('edge-button','n_clicks'),
               Input('controll-button','n_clicks'),
-              State('cytoscape-compound','elements'),
+              Input('edge-weight-button','n_clicks'),
+              State('edge-weight','value'),
               State('cytoscape-compound','selectedNodeData'),
               State('cytoscape-compound','selectedEdgeData'),
+              State('cytoscape-compound','elements'),
               prevent_initial_call=True)
-
-def updateElements(edge_button,controll_button,elements,selectedNodeData,selectedEdgeData):
+def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,selectedNodeData,selectedEdgeData,elements):
     
     # check which button was triggered
     ctx = dash.callback_context
@@ -385,19 +446,24 @@ def updateElements(edge_button,controll_button,elements,selectedNodeData,selecte
     # add or delete edges
     if button_id == 'edge-button':
         
-        # user must exclusively selecte either nodes OR edges but not both at the same time
+        # user must exclusively selecte either at least two nodes or one edge 
+        # but not both nodes and edges at the same time
         if len(selectedNodeData) > 0 and len(selectedEdgeData) > 0:
             return elements
         
         if len(selectedNodeData) >= 2 and len(selectedEdgeData) == 0:
-            return add_edges(selectedNodeData,elements)
+            return add_edges(selectedNodeData,edge_weight,elements)
         
         if len(selectedNodeData) == 0 and len(selectedEdgeData) >= 1:
             return drop_edges(selectedEdgeData,elements)
         
         else:
             return elements
-     
+    
+    # modify edge weights
+    elif button_id == 'edge-weight-button':
+        return set_edge_weights(selectedEdgeData,edge_weight,elements)
+        
     # set or unset controll nodes
     elif button_id == 'controll-button':
 
@@ -414,6 +480,22 @@ def updateElements(edge_button,controll_button,elements,selectedNodeData,selecte
                 d['data']['controller'] = not d['data']['controller']
                 
         return elements
+
+@app.callback(Output('cytoscape-compound','stylesheet'),
+              Input('cytoscape-compound','elements'),
+              State('cytoscape-compound','stylesheet'),)
+def updateEdgeStyle(elements,stylesheet):
+    
+    weights_min,weights_max = get_edge_min_max(elements)
+    
+    # add (or overwrite) edge style
+    if not any([d['selector'] == 'edge' for d in stylesheet]):
+        stylesheet.append({'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}})
+    else:
+        # FIXME: Don't use constant number here but search for the index
+        stylesheet[2] = {'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}}
+    
+    return stylesheet
     
 @app.callback(Output('state-trajectory-fig','figure'),
               Output('minimum-energy-fig','figure'),

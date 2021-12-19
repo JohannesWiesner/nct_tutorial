@@ -7,6 +7,7 @@ offered as pull requests to that package
 
 import numpy as np
 
+# FIXME: This also has to work with T < 1
 def state_trajectory(A,xi,T):
     """This function caclulates the trajectory for the network given our model
      if there are no constraints, and the target state is unknown, using the
