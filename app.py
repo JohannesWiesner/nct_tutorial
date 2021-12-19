@@ -355,21 +355,20 @@ stylesheet = [
         ]
 
 app.layout = html.Div([
-    html.Div([
-        
     # cytoscape graph
+    html.Div([
     cyto.Cytoscape(
         id='cytoscape-compound',
         layout={'name':'cose'},
-        style={'width':'50%', 'height':'500px'},
         elements=from_A_to_elements(A), # initialize elements with a function call
         selectedNodeData=[],
         selectedEdgeData=[],
-        stylesheet=stylesheet
-    ),
-    
-    # FIXME: Add an index column
+        stylesheet=stylesheet,
+        style={'width':'100%','height':'500px'}
+        )
+    ],style={'display':'inline-block','width':'50%'}),
     # x0/xf data table
+    html.Div([    
     dash_table.DataTable(
         id='states-table',
         columns=[{'id':'index','name':'index','type':'numeric'},
@@ -378,27 +377,28 @@ app.layout = html.Div([
                  ],
         data=states_df.to_dict('records'),
         editable=True
-    )]),
-    
+        )
+    ],style={'display':'inline-block','width':'25%','verticalAlign':'top'}),
+    # all control elements are placed in one container
+    html.Div([
     # topology control elements
     html.Div([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0),
               html.Button('(Un-)set controll',id='controll-button',n_clicks=0),
-             dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1),
-             html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)
-             ]),
-    
+              dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1),
+              html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)
+              ]),
     # network control elements
     html.Div([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3),
               dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1),
               dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1),
               html.Button('Plot Trajectories',id='plot-button',n_clicks=0)
-              ]),
-    
+              ])
+        ],style={'display':'inline-block','width':'25%','verticalAlign':'top'}),
     # figures
-    dcc.Graph(id='state-trajectory-fig',figure={}),
-    dcc.Graph(id='minimum-energy-fig',figure={}),
-    dcc.Graph(id='optimal-energy-fig',figure={}),
-    
+    html.Div([dcc.Graph(id='state-trajectory-fig',figure={},style={'display':'inline-block'}),
+              dcc.Graph(id='minimum-energy-fig',figure={},style={'display':'inline-block'}),
+              dcc.Graph(id='optimal-energy-fig',figure={},style={'display':'inline-block'})
+              ]),
     # debugging fields (can be deleted when not necessary anymore)
     html.Div([
     html.Pre(id='selected-node-data-json-output'),
