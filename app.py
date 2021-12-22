@@ -14,8 +14,8 @@ import dash_cytoscape as cyto
 import dash_html_components as html
 from dash.dependencies import Input, Output, State
 import dash_core_components as dcc
+import dash_bootstrap_components as dbc
 import dash_table
-import dash_daq as daq
 import itertools
 import operator
 import plotly.express as px
@@ -332,7 +332,7 @@ def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
 ###############################################################################
 
 # run dash and take in the list of elements
-app = dash.Dash(__name__)
+app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # create custom style sheet
 stylesheet = [
@@ -355,78 +355,79 @@ stylesheet = [
         ]
 
 app.layout = html.Div([
-    # cytoscape graph
-    html.Div([
-    cyto.Cytoscape(
-        id='cytoscape-compound',
-        layout={'name':'cose'},
-        elements=from_A_to_elements(A), # initialize elements with a function call
-        selectedNodeData=[],
-        selectedEdgeData=[],
-        stylesheet=stylesheet,
-        style={'width':'100%','height':'500px'}
-        )
-    ],style={'display':'inline-block','width':'50%'}),
-    # x0/xf data table
-    html.Div([    
-    dash_table.DataTable(
-        id='states-table',
-        columns=[{'id':'index','name':'index','type':'numeric'},
+    dbc.Row([
+        dbc.Col([    
+        # cytoscape graph
+        cyto.Cytoscape(
+            id='cytoscape-compound',
+            layout={'name':'cose'},
+            elements=from_A_to_elements(A), # initialize elements with a function call
+            selectedNodeData=[],
+            selectedEdgeData=[],
+            stylesheet=stylesheet,
+            style={'width':'100%','height':'500px'})
+            ],width=6),
+        dbc.Col([
+            # x0/xf data table 
+            dash_table.DataTable(
+                id='states-table',
+                columns=[{'id':'index','name':'index','type':'numeric'},
                  {'id':'x0','name':'x0','type':'numeric','editable':True},
                  {'id':'xf','name':'xf','type':'numeric','editable':True}
                  ],
-        data=states_df.to_dict('records'),
-        editable=False,
-        )
-    ],style={'display':'inline-block','width':'25%','verticalAlign':'top'}),
-    # all control elements are placed in one container
-    html.Div([
-    # topology control elements
-    html.Div([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0),
-              html.Button('(Un-)set controll',id='controll-button',n_clicks=0),
-              dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1),
-              html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)
-              ]),
-    # network control elements
-    html.Div([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3),
-              dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1),
-              dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1),
-              html.Button('Plot Trajectories',id='plot-button',n_clicks=0)
-              ])
-        ],style={'display':'inline-block','width':'25%','verticalAlign':'top'}),
-    # figures
-    html.Div([dcc.Graph(id='state-trajectory-fig',figure={},style={'display':'inline-block'}),
-              dcc.Graph(id='minimum-energy-fig',figure={},style={'display':'inline-block'}),
-              dcc.Graph(id='optimal-energy-fig',figure={},style={'display':'inline-block'})
-              ]),
-    # debugging fields (can be deleted when not necessary anymore)
-    html.Div([
-    html.Pre(id='selected-node-data-json-output'),
-    html.Pre(id='selected-edge-data-json-output'),
-    html.Pre(id='current-elements'),
-    html.Pre(id='current-stylesheet')
+                data=states_df.to_dict('records'),
+                editable=False)
+            ],width=3),
+        dbc.Col([
+            dbc.Row([dbc.Col([dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1)])]),
+            dbc.Row([dbc.Col([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3)]),dbc.Col(html.Button('Plot Trajectories',id='plot-button',n_clicks=0))]),
+            dbc.Row([dbc.Col([dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1)])]),
+            dbc.Row([dbc.Col([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0)])]),
+            dbc.Row([dbc.Col([html.Button('(Un-)set controll',id='controll-button',n_clicks=0)])]),
+            dbc.Row([dbc.Col([dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1)]),dbc.Col([html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)])])],
+            width=3)
+        ]),
+    dbc.Row([
+        # figures
+        dbc.Col([dcc.Graph(id='state-trajectory-fig',figure={})],width=4),
+        dbc.Col([dcc.Graph(id='minimum-energy-fig',figure={})],width=4),
+        dbc.Col([dcc.Graph(id='optimal-energy-fig',figure={})],width=4)
+    ]),
+    dbc.Row([
+        # debugging fields (can be deleted when not necessary anymore)
+        html.Div([
+        html.Pre(id='selected-node-data-json-output'),
+        html.Pre(id='selected-edge-data-json-output'),
+        html.Pre(id='current-elements'),
+        html.Pre(id='current-stylesheet')
+        ])
+        ])
     ])
-])
+    
 
 ## Just for debugging (can be deleted when not necessary anymore ##############
 
 @app.callback(Output('selected-node-data-json-output','children'),
-              Input('cytoscape-compound','selectedNodeData'))
+              Input('cytoscape-compound','selectedNodeData'),
+              prevent_initial_call=True)
 def displaySelectedNodeData(data):
     return json.dumps(data,indent=2)
 
 @app.callback(Output('selected-edge-data-json-output','children'),
-              Input('cytoscape-compound','selectedEdgeData'))
+              Input('cytoscape-compound','selectedEdgeData'),
+              prevent_initial_call=True)
 def displaySelectedEdgeData(data):
     return json.dumps(data,indent=2)
 
 @app.callback(Output('current-elements','children'),
-              Input('cytoscape-compound','elements'))
+              Input('cytoscape-compound','elements'),
+              prevent_initial_call=True)
 def displayCurrentElements(elements):
     return json.dumps(elements,indent=2)
 
 @app.callback(Output('current-stylesheet','children'),
-              Input('cytoscape-compound','stylesheet'))
+              Input('cytoscape-compound','stylesheet'),
+              prevent_initial_call=True)
 def displayCurrentStylesheet(elements):
     return json.dumps(elements,indent=2)
 
@@ -442,6 +443,8 @@ def displayCurrentStylesheet(elements):
               State('cytoscape-compound','elements'),
               prevent_initial_call=True)
 def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,selectedNodeData,selectedEdgeData,elements):
+    
+    print('UpdateElements was fired')
     
     # check which button was triggered
     ctx = dash.callback_context
@@ -488,7 +491,7 @@ def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,se
 
 @app.callback(Output('cytoscape-compound','stylesheet'),
               Input('cytoscape-compound','elements'),
-              State('cytoscape-compound','stylesheet'),)
+              State('cytoscape-compound','stylesheet'))
 def updateEdgeStyle(elements,stylesheet):
     
     weights_min,weights_max = get_edge_min_max(elements)
@@ -512,9 +515,10 @@ def updateEdgeStyle(elements,stylesheet):
               State('rho','value'),
               State('states-table','derived_virtual_data'),
               prevent_initial_call=True)
-
 def updateFigures(n_clicks,elements,T,c,rho,states_data):
     
+    print('UpdateFigures was fired')
+        
     # digest data for network_control package
     A = from_elements_to_A(elements)
     B = from_elements_to_B(elements)
@@ -545,4 +549,4 @@ def updateFigures(n_clicks,elements,T,c,rho,states_data):
     return fig_1,fig_2,fig_3
     
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=True,use_reloader=False)
