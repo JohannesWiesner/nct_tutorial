@@ -78,6 +78,7 @@ def from_A_to_elements(A):
              d['label'] = d.pop('value')
              del d['name'] 
              d['controller'] = True
+             d['constrain'] = True
              
     # NOTE: in cytoscape, all ids of the nodes must be strings, that's why
     # we convert the edge ids also to strings (but check if this is really 
@@ -244,6 +245,7 @@ def from_elements_to_A(elements):
     
     return A
 
+# FIXME: lots of repetitions to from_elements_to_S
 def from_elements_to_B(elements):
     '''Extract nodes from current elements, check which nodes are selected
     as controllers and get a corresponding control matrix B that can be 
@@ -267,6 +269,31 @@ def from_elements_to_B(elements):
             B[idx,idx] = 1
       
     return B
+
+# FIXME: lots of repetitions to from_elements_to_B
+def from_elements_to_S(elements):
+    '''Extract nodes from current elements, check which nodes are selected
+    to be constrained and get a corresponding matrix S that can be 
+    fed to control_package functions.
+    '''
+    
+    # get a list of all nodes from current elements (get their ID and their
+    # controller attribute)
+    node_dicts = get_node_dicts(elements)
+    nodes = [(d['data']['id'],d['data']['constrain']) for d in node_dicts]
+    
+    # sort nodes by their ids and get controller attribute
+    nodes.sort(key=operator.itemgetter(0))
+    constrain_attributes = [n[1] for n in nodes]
+
+    # create B matrix
+    S = np.zeros(shape=(len(nodes),len(nodes)))
+
+    for idx,constrain in enumerate(constrain_attributes):
+        if constrain == True:
+            S[idx,idx] = 1
+      
+    return S
 
 def get_state_trajectory_fig(A,x0,T,c):
     '''Generate a plotly figure that plots a state trajectory using an input 
@@ -335,24 +362,15 @@ def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
 app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
 
 # create custom style sheet
-stylesheet = [
-            # Show the labels of the nodes
-            {
-                'selector': 'node',
-                'style': {
-                    'content': 'data(label)'
-                }
-            },
-            # Style all nodes that are controller nodes
-            {
-                'selector': '[?controller]',
-                'style': {
-                    'border-width': 2,
-                    'border-color': 'black'
-                }
-            }
-            
-        ]
+# show node labels
+# Style the border of the nodes depending on if they are controllers
+# and constrained
+stylesheet = [{'selector':'node','style':{'content':'data(label)'}},
+              {'selector': '[?controller][?constrain]','style':{'border-width':2,'border-color':'black','border-style':'solid'}},
+              {'selector':'[?controller][!constrain]','style':{'border-width':2,'border-color':'black','border-style':'dashed'}},
+              {'selector':'[!controller][?constrain]','style':{'border-width':2,'border-color':'black','border-style':'dotted'}},
+              {'selector':'[!controller][!constrain]','style':{}}
+              ]
 
 app.layout = html.Div([
     dbc.Row([
@@ -383,6 +401,7 @@ app.layout = html.Div([
             dbc.Row([dbc.Col([dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1)])]),
             dbc.Row([dbc.Col([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0)])]),
             dbc.Row([dbc.Col([html.Button('(Un-)set controll',id='controll-button',n_clicks=0)])]),
+            dbc.Row([dbc.Col([html.Button('(Un-)set constrain',id='constrain-button',n_clicks=0)])]),
             dbc.Row([dbc.Col([dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1)]),dbc.Col([html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)])])],
             width=3)
         ]),
@@ -394,14 +413,13 @@ app.layout = html.Div([
     ]),
     dbc.Row([
         # debugging fields (can be deleted when not necessary anymore)
-        html.Div([
-        html.Pre(id='selected-node-data-json-output'),
-        html.Pre(id='selected-edge-data-json-output'),
-        html.Pre(id='current-elements'),
-        html.Pre(id='current-stylesheet')
-        ])
-        ])
+        dbc.Col([html.Label(children='Selected Nodes:'),html.Pre(id='selected-node-data-json-output')],width=3),
+        dbc.Col([html.Label(children='Selected Edges:'),html.Pre(id='selected-edge-data-json-output')],width=3),
+        dbc.Col([html.Label(children='Current Elements:'),html.Pre(id='current-elements')],width=3),
+        dbc.Col([html.Label(children='Current Stylesheet:'),html.Pre(id='current-stylesheet')],width=3)
     ])
+])
+
     
 
 ## Just for debugging (can be deleted when not necessary anymore ##############
@@ -435,13 +453,14 @@ def displayCurrentStylesheet(elements):
 @app.callback(Output('cytoscape-compound','elements'),
               Input('edge-button','n_clicks'),
               Input('controll-button','n_clicks'),
+              Input('constrain-button','n_clicks'),
               Input('edge-weight-button','n_clicks'),
               State('edge-weight','value'),
               State('cytoscape-compound','selectedNodeData'),
               State('cytoscape-compound','selectedEdgeData'),
               State('cytoscape-compound','elements'),
               prevent_initial_call=True)
-def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,selectedNodeData,selectedEdgeData,elements):
+def updateElements(edge_button,controll_button,constrain_button,edge_weight_button,edge_weight,selectedNodeData,selectedEdgeData,elements):
     
     print('UpdateElements was fired')
     
@@ -487,7 +506,26 @@ def updateElements(edge_button,controll_button,edge_weight_button,edge_weight,se
                 d['data']['controller'] = not d['data']['controller']
                 
         return elements
+    
+    elif button_id == 'constrain-button':
+        
+        # get a list of ids of all nodes that user has currently selected and for
+        # which controll state should be switched
+        node_ids = [d['id'] for d in selectedNodeData]
+        
+        # identify node dicts in elements and toggle their 'controller' attribute 
+        # if they are part of the selected nodes
+        node_dicts = get_node_dicts(elements)
+        
+        for d in node_dicts:
+            if d['data']['id'] in node_ids:
+                d['data']['constrain'] = not d['data']['constrain']
+        
+        return elements
 
+# TODO: This callback is currently always fired when elements are changed.
+# But it actually only needs to be fired when either the minimum or maximum
+# edge weights change
 @app.callback(Output('cytoscape-compound','stylesheet'),
               Input('cytoscape-compound','elements'),
               State('cytoscape-compound','stylesheet'))
@@ -499,8 +537,8 @@ def updateEdgeStyle(elements,stylesheet):
     if not any([d['selector'] == 'edge' for d in stylesheet]):
         stylesheet.append({'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}})
     else:
-        # FIXME: Don't use constant number here but search for the index
-        stylesheet[2] = {'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}}
+        edge_style_idx = [i for i,d in enumerate(stylesheet) if d['selector'] == 'edge'][0]
+        stylesheet[edge_style_idx] = {'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}}
     
     return stylesheet
 
@@ -531,31 +569,33 @@ def switchStateColums(n_clicks,states_data):
               prevent_initial_call=True)
 def updateFigures(n_clicks,elements,T,c,rho,states_data):
     
+    # debugging
     print('UpdateFigures was fired')
         
     # digest data for network_control package
     A = from_elements_to_A(elements)
     B = from_elements_to_B(elements)
+    S = from_elements_to_S(elements)
+    
+    # debugging
+    print(f"This is A:\n{A}\n")
+    print(f"This is B:\n{B}\n")
+    print(f"This is S:\n{S}\n")
     
     # normalize A
     # FIXME: It should also be possible to not normalize the matrix (i.o.
     # to get an intuition for what happens when you not apply normalization)
     A = matrix_normalization(A,c)
     
-    print(f"This is A:\n{A}\n")
-    print(f"This is B:\n{B}\n")
-    
     # FIXME: Currently we use reshape (-1,1), but this is a bug in network
     # control-package. When this is fixed, we don't need reshape anymore
     x0 = np.array([d['x0'] for d in states_data]).reshape(-1,1)
     xf = np.array([d['xf'] for d in states_data]).reshape(-1,1)
     
+    # debugging
     print(f"This is x0:\n{x0}\n")
     print(f"This is xf:\n{xf}\n")
         
-    # FIXME: S should also be settable by user (controll which nodes to constrain)
-    S = B.copy()
-    
     fig_1 = get_state_trajectory_fig(A,x0=x0,T=T,c=c)
     fig_2 = get_minimum_energy_figure(A=A,T=T,B=B,x0=x0,xf=xf,c=c)
     fig_3 = get_optimal_energy_figure(A=A,T=T,B=B,x0=x0,xf=xf,rho=rho,S=S,c=c)
