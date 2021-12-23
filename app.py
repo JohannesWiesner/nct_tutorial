@@ -369,15 +369,14 @@ app.layout = html.Div([
             ],width=6),
         dbc.Col([
             # x0/xf data table 
-            dash_table.DataTable(
-                id='states-table',
-                columns=[{'id':'index','name':'index','type':'numeric'},
-                 {'id':'x0','name':'x0','type':'numeric','editable':True},
-                 {'id':'xf','name':'xf','type':'numeric','editable':True}
-                 ],
-                data=states_df.to_dict('records'),
-                editable=False)
-            ],width=3),
+            dbc.Row([dash_table.DataTable(id='states-table',
+                                          columns=[{'id':'index','name':'index','type':'numeric'},
+                                                   {'id':'x0','name':'x0','type':'numeric','editable':True},
+                                                   {'id':'xf','name':'xf','type':'numeric','editable':True}],
+                                          data=states_df.to_dict('records'),
+                                          editable=False)]),
+            dbc.Row([html.Button('Switch columns',id='switch-state-cols',n_clicks=0)])],
+            width=3),
         dbc.Col([
             dbc.Row([dbc.Col([dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1)])]),
             dbc.Row([dbc.Col([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3)]),dbc.Col(html.Button('Plot Trajectories',id='plot-button',n_clicks=0))]),
@@ -504,7 +503,22 @@ def updateEdgeStyle(elements,stylesheet):
         stylesheet[2] = {'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}}
     
     return stylesheet
+
+@app.callback(Output('states-table','data'),
+              Input('switch-state-cols','n_clicks'),
+              State('states-table','derived_virtual_data'),
+              prevent_initial_call=True)
+def switchStateColums(n_clicks,states_data):
     
+    print(states_data)
+    
+    states_data_copy = states_data.copy()
+    
+    for d in states_data_copy:
+        d['x0'],d['xf'] = d['xf'],d['x0']
+    
+    return states_data_copy
+
 @app.callback(Output('state-trajectory-fig','figure'),
               Output('minimum-energy-fig','figure'),
               Output('optimal-energy-fig','figure'),
