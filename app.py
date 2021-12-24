@@ -380,8 +380,6 @@ app.layout = html.Div([
             id='cytoscape-compound',
             layout={'name':'cose'},
             elements=from_A_to_elements(A), # initialize elements with a function call
-            selectedNodeData=[],
-            selectedEdgeData=[],
             stylesheet=stylesheet,
             style={'width':'100%','height':'500px'})
             ],width=6),
@@ -392,8 +390,8 @@ app.layout = html.Div([
                                                    {'id':'x0','name':'x0','type':'numeric','editable':True},
                                                    {'id':'xf','name':'xf','type':'numeric','editable':True}],
                                           data=states_df.to_dict('records'),
-                                          editable=False)]),
-            dbc.Row([html.Button('Switch columns',id='switch-state-cols',n_clicks=0)])],
+                                          editable=False)],justify='center'),
+            dbc.Row([html.Button('Switch columns',id='switch-state-cols',n_clicks=0,style={'width':'100%'})],justify='center')],
             width=3),
         dbc.Col([
             dbc.Row([dbc.Col([dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1)])]),
@@ -404,20 +402,20 @@ app.layout = html.Div([
             dbc.Row([dbc.Col([html.Button('(Un-)set constrain',id='constrain-button',n_clicks=0)])]),
             dbc.Row([dbc.Col([dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1)]),dbc.Col([html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)])])],
             width=3)
-        ]),
+        ],align='end'),
     dbc.Row([
         # figures
         dbc.Col([dcc.Graph(id='state-trajectory-fig',figure={})],width=4),
         dbc.Col([dcc.Graph(id='minimum-energy-fig',figure={})],width=4),
         dbc.Col([dcc.Graph(id='optimal-energy-fig',figure={})],width=4)
-    ]),
+    ],className="g-0"),
     dbc.Row([
         # debugging fields (can be deleted when not necessary anymore)
         dbc.Col([html.Label(children='Selected Nodes:'),html.Pre(id='selected-node-data-json-output')],width=3),
         dbc.Col([html.Label(children='Selected Edges:'),html.Pre(id='selected-edge-data-json-output')],width=3),
         dbc.Col([html.Label(children='Current Elements:'),html.Pre(id='current-elements')],width=3),
         dbc.Col([html.Label(children='Current Stylesheet:'),html.Pre(id='current-stylesheet')],width=3)
-    ])
+    ],className="g-0")
 ])
 
     
