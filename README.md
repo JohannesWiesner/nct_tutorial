@@ -1,5 +1,6 @@
 # nct_tutorial
 A dash application for learning [Network Control Theory (NCT)](https://github.com/BassettLab/control_package)
+![preview](preview.png)
 
 ## Requirements
 ```
