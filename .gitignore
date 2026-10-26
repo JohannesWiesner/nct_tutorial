@@ -7,3 +7,6 @@ __pycache__/
 # Temporary pip build directories
 pip-*/
 tmp_*/
+
+# Optional JavaScript test dependencies
+node_modules/
