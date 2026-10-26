@@ -1,2 +1,9 @@
-# ignore pycache folder
+# Python caches and local environments
 __pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+
+# Temporary pip build directories
+pip-*/
+tmp_*/

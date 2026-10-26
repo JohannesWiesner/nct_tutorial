@@ -1,604 +1,459 @@
-# -*- coding: utf-8 -*-
-"""
-Network Control Theory Tutorial
+"""Interactive Network Control Theory tutorial."""
 
-@author: Johannes.Wiesner
-"""
+from __future__ import annotations
 
+import base64
 import json
+
 import numpy as np
 import pandas as pd
-import networkx as nx
-import dash
-import dash_cytoscape as cyto
-import dash_html_components as html
-from dash.dependencies import Input, Output, State
-import dash_core_components as dcc
-import dash_bootstrap_components as dbc
-import dash_table
-import itertools
-import operator
 import plotly.express as px
+import plotly.graph_objects as go
+from dash import Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
+import dash_bootstrap_components as dbc
+import dash_cytoscape as cyto
+from network_control.energies import minimum_input, optimal_input
 from network_control.utils import matrix_normalization
-from network_control.energies import minimum_input,optimal_input
-from nct_utils import state_trajectory
 
-###############################################################################
-## Set Default Data ###########################################################
-###############################################################################
+from nct_utils import (
+    add_node,
+    aggregate_control_energy,
+    delete_nodes,
+    from_adjacency_matrix,
+    matrices_from_elements,
+    node_ids,
+    split_elements,
+    state_trajectory,
+    toggle_edges,
+    toggle_node_flag,
+    topology_metrics,
+    update_edge_weight,
+    validate_configuration,
+)
 
-# set seed
-np.random.seed(28)
 
-# create a default adjacency matrix
-A = np.array([[0, 1, 2, 1, 0, 0, 0, 0, 0],
-              [1, 0, 0, 3, 0, 0, 0, 0, 0],
-              [2, 0, 0, 4, 0, 0, 0, 0, 0],
-              [1, 3, 4, 0, 5, 0, 0, 0, 0],
-              [0, 0, 0, 5, 0, 6, 0, 0, 0],
-              [0, 0, 0, 0, 6, 0, 1, 1, 0],
-              [0, 0, 0, 0, 0, 1, 0, 1, 1],
-              [0, 0, 0, 0, 0, 1, 1, 0, 1],
-              [0, 0, 0, 0, 0, 0, 1, 1, 0]])
+DEFAULT_ADJACENCY = np.array(
+    [
+        [0, 1, 2, 1, 0, 0, 0, 0, 0],
+        [1, 0, 0, 3, 0, 0, 0, 0, 0],
+        [2, 0, 0, 4, 0, 0, 0, 0, 0],
+        [1, 3, 4, 0, 5, 0, 0, 0, 0],
+        [0, 0, 0, 5, 0, 6, 0, 0, 0],
+        [0, 0, 0, 0, 6, 0, 1, 1, 0],
+        [0, 0, 0, 0, 0, 1, 0, 1, 1],
+        [0, 0, 0, 0, 0, 1, 1, 0, 1],
+        [0, 0, 0, 0, 0, 0, 1, 1, 0],
+    ],
+    dtype=float,
+)
 
-# create default (random) x0 and xf (between 0 and 1)
-states_df = pd.DataFrame({'x0':np.round(np.random.rand(len(A)),2),'xf':np.round(np.random.rand(len(A)),2)})
-states_df.reset_index(inplace=True)
 
-###############################################################################
-## Dash App ###################################################################
-###############################################################################
+def default_store() -> dict:
+    rng = np.random.default_rng(28)
+    ids = [str(index) for index in range(len(DEFAULT_ADJACENCY))]
+    return {
+        "elements": from_adjacency_matrix(DEFAULT_ADJACENCY),
+        "states": [
+            {"id": node_id, "x0": round(float(x0), 2), "xf": round(float(xf), 2)}
+            for node_id, x0, xf in zip(ids, rng.random(len(ids)), rng.random(len(ids)))
+        ],
+        "c": 1.0,
+        "T": 3,
+        "rho": 1.0,
+    }
 
-## Topology-Modification ######################################################
 
-# FIXME: transform networkx coordinates into dash/plotly space
-# - Positions could however also be irrelevant here, because layout component
-# from dash can also decide automatically over node positions
-def from_A_to_elements(A):
-    '''Create a lists of elements from a numpy adjaceny matrix that can be inter-
-    preted by dash_cytoscape.Cytoscape. The following steps are implemented from 
-    https://community.plotly.com/t/converting-networkx-graph-object-into-cytoscape-format/23224/2
-    '''
-    
-    # create graph object
-    G = nx.Graph(A)
-    
-    # get node positions
-    pos = nx.spring_layout(G)
-    
-    # convert networkx to cytoscape layout
-    cy = nx.readwrite.json_graph.cytoscape_data(G)
-    
-    # Add the dictionary key 'label' to the node dict (this is a required attribute for dash)
-    # Delete the key 'value' from node dict (not needed)
-    # Delete the key 'name' from node dict (not needed)
-    # Add the dictionary key 'controller' to the node dict and set to True
-    for node_dict in cy['elements']['nodes']:
-         for _,d in node_dict.items():
-             d['label'] = d.pop('value')
-             del d['name'] 
-             d['controller'] = True
-             d['constrain'] = True
-             
-    # NOTE: in cytoscape, all ids of the nodes must be strings, that's why
-    # we convert the edge ids also to strings (but check if this is really 
-    # necessary)
-    for edge_dict in cy['elements']['edges']:
-        for _,d in edge_dict.items():
-            d['source'] = str(d['source'])
-            d['target'] = str(d['target'])
-    
-    # Add the positions you got from as a value for data in the nodes portion of cy
-    # NOTE: This might be not necessary, as positions can be automatically
-    # determined in the layout attribute from cyto.Cytoscape (see FIXME above)
-    for n,p in zip(cy['elements']['nodes'],pos.values()):
-        n['pos'] = {'x':p[0],'y':p[1]}
-    
-    # Take the results and write them to a list
-    elements = cy['elements']['nodes'] + cy['elements']['edges']
-    
-    return elements
+def stylesheet_for(elements: dict) -> list[dict]:
+    grouped = split_elements(elements)
+    weights = [float(edge["data"].get("weight", 1)) for edge in grouped["edges"]]
+    low = min(weights, default=1.0)
+    high = max(weights, default=1.0)
+    if np.isclose(low, high):
+        high = low + 1.0
+    return [
+        {"selector": "node", "style": {"content": "data(label)"}},
+        {
+            "selector": "[?controller][?constrain]",
+            "style": {"border-width": 2, "border-color": "black", "border-style": "solid"},
+        },
+        {
+            "selector": "[?controller][!constrain]",
+            "style": {"border-width": 2, "border-color": "black", "border-style": "dashed"},
+        },
+        {
+            "selector": "[!controller][?constrain]",
+            "style": {"border-width": 2, "border-color": "black", "border-style": "dotted"},
+        },
+        {"selector": "[!controller][!constrain]", "style": {}},
+        {
+            "selector": "edge",
+            "style": {"width": f"mapData(weight,{low},{high},1,6)", "label": "data(weight)"},
+        },
+    ]
 
-# NOTE: What's that utils module? https://dash.plotly.com/cytoscape/reference
-def get_edge_dicts(elements):
-    '''Extract all edge dictionaries from elements. Edge dicts are
-    identfied by their 'weight' key'''
-    
-    edge_dicts = []
-    
-    for d in elements:
-        if 'weight' in d['data']:
-            edge_dicts.append(d)
-            
-    return edge_dicts
 
-# NOTE: What's that utils module? https://dash.plotly.com/cytoscape/reference
-def get_node_dicts(elements):
-    '''Extract all node dictionaries from elements. Node dicts are
-    identified by not having a 'weight' key'''
-    
-    node_dicts = []
-    
-    for d in elements:
-        if not 'weight' in d['data']:
-            node_dicts.append(d)
-            
-    return node_dicts
+def metric_cards(elements: dict) -> list:
+    labels = {
+        "nodes": "Nodes",
+        "edges": "Edges",
+        "density": "Density",
+        "mean_degree": "Mean degree",
+        "mean_strength": "Mean strength",
+        "mean_clustering": "Mean clustering",
+    }
+    metrics = topology_metrics(elements)
+    return [
+        dbc.Col(
+            dbc.Card(
+                dbc.CardBody(
+                    [
+                        html.Small(labels[key], className="text-muted"),
+                        html.H5(value if isinstance(value, int) else f"{value:.3f}"),
+                    ]
+                )
+            ),
+            xs=6,
+            md=2,
+        )
+        for key, value in metrics.items()
+    ]
 
-def add_edges(selectedNodeData,edge_weight,elements):
-    '''For each combination of selected nodes, check if this combination is connected 
-    by an edge. If not, create an edge dict for that combination and modify the elements list'''
-    
-    edge_dicts = get_edge_dicts(elements)
-    edge_ids = [(d['data']['source'],d['data']['target']) for d in edge_dicts]
-    
-    # get a list of ids of all nodes that user has currently selected and that
-    # should be connected by an edge. Sort the list alphanumerically (that ensures 
-    # that we get only get combinations of source and target ids where source id 
-    # is always the lower integer)
-    node_ids = [d['id'] for d in selectedNodeData]
-    node_ids.sort()
-    
-    # create all pair-wise combinations of the selected nodes
-    source_and_target_ids = list(itertools.combinations(node_ids,2))
-    
-    # for each source and target tuple, check if this edge already exists. If not,
-    # create a new edge dict and add it to elements
-    for (source,target) in source_and_target_ids:
-        if not (source,target) in edge_ids:
-              new_edge = {'data':{'weight':edge_weight,'source':source,'target':target}}
-              elements.append(new_edge)
-    
-    return elements
 
-def drop_edges(selectedEdgeData,elements):
-    '''Drop an input list of selected edges from cytoscape elements'''
+def decode_upload(contents: str) -> dict:
+    if not contents or "," not in contents:
+        raise ValueError("Choose a JSON configuration file")
+    _, encoded = contents.split(",", 1)
+    try:
+        payload = json.loads(base64.b64decode(encoded, validate=True).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValueError("The upload is not valid UTF-8 JSON") from error
+    return validate_configuration(payload)
 
-    # get source and target ids for all currently selected edges
-    source_and_target_ids = [(d['source'],d['target']) for d in selectedEdgeData]
-    
-    # iterate over all dictionaries in elements, identify edge dicts by their
-    # 'weight' key and check again if this edge dict belongs to the currently selected
-    # edges. If yes, add its index to list of to be dropped dictionaires.
-    drop_these_dicts = []
-    
-    for idx,d in enumerate(elements):
-        if 'weight' in d['data']:
-            if (d['data']['source'],d['data']['target']) in source_and_target_ids:
-                drop_these_dicts.append(idx)
-    
-    # drop selected edge dictionaries from elements
-    elements = [i for j,i in enumerate(elements) if j not in drop_these_dicts]
-    
-    return elements
 
-def get_edge_min_max(elements):
-    '''Get minimum and maximum edge weights'''
-    
-    # get all edges from elements
-    edge_dicts = get_edge_dicts(elements)
-    
-    # find minimum and maximum weights
-    edge_weights = [d['data']['weight'] for d in edge_dicts]
-    weights_max = max(edge_weights)
-    weights_min = min(edge_weights)
+def merge_state_edits(store: dict, rows: list[dict] | None) -> dict:
+    if rows is None:
+        return store
+    valid_ids = set(node_ids(store["elements"]))
+    store["states"] = [
+        {"id": str(row["id"]), "x0": float(row["x0"]), "xf": float(row["xf"])}
+        for row in rows
+        if str(row.get("id")) in valid_ids
+    ]
+    return store
 
-    return weights_min,weights_max
 
-# FIXME: Delete this function if it's not necessary
-def set_edge_width(elements,edge_weight):
-    '''Return the edge width for a single edge'''
-    
-    weights_min,weights_max = get_edge_min_max(elements)
-    
-    min_width = 1 # constant (selected by me)
-    max_width = 10 # constant (selected by me)
-    edge_width = min_width + ((max_width - min_width) / (weights_max - weights_min)) * (edge_weight - weights_min)
+def trajectory_figure(trajectory: np.ndarray, ids: list[str], title: str) -> go.Figure:
+    frame = pd.DataFrame(trajectory, columns=ids)
+    frame.index.name = "t"
+    tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
+    figure = px.line(tidy, x="t", y="Value", color="Node", title=title)
+    figure.update_layout(title_x=0.5)
+    return figure
 
-    return edge_width
 
-def set_edge_weights(selectedEdgeData,edge_weight,elements):
-    '''Modify the weights of the selected edges'''
-    
-    # get source and target ids for all currently selected edges
-    source_and_target_ids = [(d['source'],d['target']) for d in selectedEdgeData]
-    
-    # iterate over all dictionaries in elements, identify edge dicts by their
-    # 'weight' key and check again if this edge dict belongs to the currently selected
-    # edges. If yes, add its index to list of to be dropped dictionaires.
-    modify_these_dicts = []
-    
-    for idx,d in enumerate(elements):
-        if 'weight' in d['data']:
-            if (d['data']['source'],d['data']['target']) in source_and_target_ids:
-                modify_these_dicts.append(idx)
-                    
-    # drop selected edge dictionaries from elements
-    for i in modify_these_dicts:
-        elements[i]['data']['weight'] = edge_weight
-        
-    return elements
+def control_figure(states: np.ndarray, control: np.ndarray, ids: list[str], title: str) -> go.Figure:
+    frames = []
+    for values, kind in ((states, "State x"), (control, "Input u")):
+        columns = ids[: values.shape[1]]
+        frame = pd.DataFrame(values[:, : len(columns)], columns=columns)
+        frame.index.name = "t"
+        tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
+        tidy["Type"] = kind
+        frames.append(tidy)
+    figure = px.line(
+        pd.concat(frames, ignore_index=True),
+        x="t",
+        y="Value",
+        color="Node",
+        facet_row="Type",
+        title=title,
+    )
+    figure.update_layout(title_x=0.5)
+    return figure
 
-## Figure Plotting ###########################################################
 
-def from_elements_to_A(elements):
-    '''Extract nodes and edges from current elements and convert them to 
-    adjacency matrix
-    '''
+def energy_figure(minimum_u: np.ndarray, optimal_u: np.ndarray, ids: list[str]) -> go.Figure:
+    minimum = aggregate_control_energy(minimum_u)
+    optimal = aggregate_control_energy(optimal_u)
+    count = min(len(ids), len(minimum), len(optimal))
+    frame = pd.DataFrame(
+        {
+            "Node": ids[:count] * 2,
+            "Energy": np.concatenate((minimum[:count], optimal[:count])),
+            "Method": ["Minimum"] * count + ["Optimal"] * count,
+        }
+    )
+    figure = px.bar(
+        frame,
+        x="Node",
+        y="Energy",
+        color="Method",
+        barmode="group",
+        title="Aggregate control energy by node",
+    )
+    figure.update_layout(title_x=0.5)
+    return figure
 
-    # FIXME: This is inefficient, we iterate over the same list twice (see #8)
-    edge_dicts = get_edge_dicts(elements)
-    node_dicts = get_node_dicts((elements))
-    
-    edges = [(d['data']['source'],d['data']['target'],d['data']['weight']) for d in edge_dicts]
-    nodes = [d['data']['id'] for d in node_dicts]
-    
-    n_nodes = len(nodes)
-    A = np.zeros((n_nodes,n_nodes))
 
-    for edge in edges:
-        i = int(edge[0])
-        j = int(edge[1])
-        weight = edge[2]
-        A[i,j] = weight
-        A[j,i] = weight
-    
-    return A
+initial = default_store()
+app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+server = app.server
+app.title = "Network Control Theory Tutorial"
 
-# FIXME: lots of repetitions to from_elements_to_S
-def from_elements_to_B(elements):
-    '''Extract nodes from current elements, check which nodes are selected
-    as controllers and get a corresponding control matrix B that can be 
-    fed to control_package functions.
-    '''
-    
-    # get a list of all nodes from current elements (get their ID and their
-    # controller attribute)
-    node_dicts = get_node_dicts(elements)
-    nodes = [(d['data']['id'],d['data']['controller']) for d in node_dicts]
-    
-    # sort nodes by their ids and get controller attribute
-    nodes.sort(key=operator.itemgetter(0))
-    c_attributes = [n[1] for n in nodes]
+app.layout = dbc.Container(
+    [
+        dcc.Store(id="network-store", data=initial),
+        html.H1("Network Control Theory Tutorial", className="my-3"),
+        dbc.Row(
+            [
+                dbc.Col(
+                    cyto.Cytoscape(
+                        id="cytoscape",
+                        layout={"name": "cose", "animate": False},
+                        elements=initial["elements"],
+                        stylesheet=stylesheet_for(initial["elements"]),
+                        style={"width": "100%", "height": "520px"},
+                    ),
+                    lg=7,
+                ),
+                dbc.Col(
+                    [
+                        html.H4("States"),
+                        dash_table.DataTable(
+                            id="states-table",
+                            columns=[
+                                {"id": "id", "name": "Node", "editable": False},
+                                {"id": "x0", "name": "x0", "type": "numeric"},
+                                {"id": "xf", "name": "xf", "type": "numeric"},
+                            ],
+                            data=initial["states"],
+                            editable=True,
+                        ),
+                        dbc.Button("Switch x0 / xf", id="switch-states", className="my-2", n_clicks=0),
+                        html.H4("Parameters", className="mt-3"),
+                        dbc.Row(
+                            [
+                                dbc.Col(dbc.Input(id="c", type="number", min=0.000001, value=initial["c"], placeholder="c")),
+                                dbc.Col(dbc.Input(id="T", type="number", min=1, step=1, value=initial["T"], placeholder="T")),
+                                dbc.Col(dbc.Input(id="rho", type="number", min=0.000001, value=initial["rho"], placeholder="rho")),
+                            ],
+                            className="g-2",
+                        ),
+                        html.H4("Edit network", className="mt-3"),
+                        dbc.ButtonGroup(
+                            [
+                                dbc.Button("Add node", id="add-node", n_clicks=0),
+                                dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
+                            ],
+                            className="mb-2",
+                        ),
+                        dbc.ButtonGroup(
+                            [
+                                dbc.Button("Connect / disconnect", id="toggle-edge", n_clicks=0),
+                                dbc.Button("Toggle controller", id="toggle-controller", n_clicks=0),
+                                dbc.Button("Toggle constraint", id="toggle-constraint", n_clicks=0),
+                            ],
+                            className="mb-2 d-flex",
+                        ),
+                        dbc.InputGroup(
+                            [
+                                dbc.Input(id="edge-weight", type="number", min=0.000001, value=1),
+                                dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
+                            ],
+                            className="mb-3",
+                        ),
+                        dcc.Upload(
+                            id="upload-data",
+                            children=dbc.Button("Upload JSON configuration", color="secondary"),
+                            accept="application/json,.json",
+                        ),
+                        html.Div(id="edit-status", className="mt-2"),
+                        dbc.Button("Plot trajectories and energy", id="plot", color="primary", className="mt-3", n_clicks=0),
+                        html.Div(id="plot-status", className="mt-2 text-danger"),
+                    ],
+                    lg=5,
+                ),
+            ],
+            className="g-3",
+        ),
+        html.H3("Topology measures", className="mt-4"),
+        dbc.Row(metric_cards(initial["elements"]), id="topology-metrics", className="g-2"),
+        dbc.Row(
+            [
+                dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
+                dbc.Col(dcc.Graph(id="aggregate-energy", figure=go.Figure()), lg=6),
+                dbc.Col(dcc.Graph(id="minimum-energy", figure=go.Figure()), lg=6),
+                dbc.Col(dcc.Graph(id="optimal-energy", figure=go.Figure()), lg=6),
+            ],
+            className="g-0 mt-3",
+        ),
+    ],
+    fluid=True,
+)
 
-    # create B matrix
-    B = np.zeros(shape=(len(nodes),len(nodes)))
 
-    for idx,c in enumerate(c_attributes):
-        if c == True:
-            B[idx,idx] = 1
-      
-    return B
+@app.callback(
+    Output("network-store", "data"),
+    Output("edit-status", "children"),
+    Input("add-node", "n_clicks"),
+    Input("delete-node", "n_clicks"),
+    Input("toggle-edge", "n_clicks"),
+    Input("toggle-controller", "n_clicks"),
+    Input("toggle-constraint", "n_clicks"),
+    Input("set-edge-weight", "n_clicks"),
+    Input("switch-states", "n_clicks"),
+    Input("upload-data", "contents"),
+    State("network-store", "data"),
+    State("states-table", "data"),
+    State("cytoscape", "selectedNodeData"),
+    State("cytoscape", "selectedEdgeData"),
+    State("edge-weight", "value"),
+    State("c", "value"),
+    State("T", "value"),
+    State("rho", "value"),
+    prevent_initial_call=True,
+)
+def update_network(
+    _add_clicks,
+    _delete_clicks,
+    _edge_clicks,
+    _controller_clicks,
+    _constraint_clicks,
+    _weight_clicks,
+    _switch_clicks,
+    upload_contents,
+    store,
+    state_rows,
+    selected_nodes,
+    selected_edges,
+    edge_weight,
+    c,
+    time_horizon,
+    rho,
+):
+    action = ctx.triggered_id
+    try:
+        if action == "upload-data":
+            return decode_upload(upload_contents), "Configuration loaded."
 
-# FIXME: lots of repetitions to from_elements_to_B
-def from_elements_to_S(elements):
-    '''Extract nodes from current elements, check which nodes are selected
-    to be constrained and get a corresponding matrix S that can be 
-    fed to control_package functions.
-    '''
-    
-    # get a list of all nodes from current elements (get their ID and their
-    # controller attribute)
-    node_dicts = get_node_dicts(elements)
-    nodes = [(d['data']['id'],d['data']['constrain']) for d in node_dicts]
-    
-    # sort nodes by their ids and get controller attribute
-    nodes.sort(key=operator.itemgetter(0))
-    constrain_attributes = [n[1] for n in nodes]
+        store = merge_state_edits(dict(store), state_rows)
+        store.update({"c": c, "T": time_horizon, "rho": rho})
+        selected_nodes = selected_nodes or []
+        selected_edges = selected_edges or []
+        selected = [str(node["id"]) for node in selected_nodes]
 
-    # create B matrix
-    S = np.zeros(shape=(len(nodes),len(nodes)))
-
-    for idx,constrain in enumerate(constrain_attributes):
-        if constrain == True:
-            S[idx,idx] = 1
-      
-    return S
-
-def get_state_trajectory_fig(A,x0,T,c):
-    '''Generate a plotly figure that plots a state trajectory using an input 
-    matrix, a source state, a time horizon and a normalization constant'''
-    
-    # simulate state trajectory
-    x = state_trajectory(A=A,xi=x0,T=T)
-    
-    # create figure
-    x_df = pd.DataFrame(x).reset_index().rename(columns={'index':'Node'})
-    x_df = x_df.melt(id_vars='Node',var_name='t',value_name='Value')
-    fig = px.line(x_df,x='t',y='Value',color='Node')
-    fig.update_layout(title='x(t+1) = Ax(t)',title_x=0.5)
-    
-    return fig
-
-# FIXME: Plotting speed could probably bee optimized, take a look in niplot module
-# TO-DO: n_err should also be visualized somewhere
-def get_minimum_energy_figure(A,T,B,x0,xf,c):
-            
-    # compute minimum energy
-    x,u,n_err = minimum_input(A,T,B,x0,xf)
-    
-    # create figure (FIXME: could the following be shorted?)
-    x_df = pd.DataFrame(x).reset_index().rename(columns={'index':'t'})
-    x_df = x_df.melt(id_vars='t',var_name='Node',value_name='Value')
-    x_df['Type'] = 'x'
-    
-    u_df = pd.DataFrame(u).reset_index().rename(columns={'index':'t'})
-    u_df = u_df.melt(id_vars='t',var_name='Node',value_name='Value')
-    u_df['Type'] = 'u'
-    
-    fig_df = pd.concat([x_df,u_df])
-    fig = px.line(fig_df,x='t',y='Value',color='Node',facet_row='Type')
-    fig.update_layout(title='Minimum Control Energy',title_x=0.5)
-    
-    return fig
-
-# FIXME: Plotting speed could probably bee optimized, take a look in niplot module
-# TO-DO: n_err should also be visualized somewhere
-def get_optimal_energy_figure(A,T,B,x0,xf,rho,S,c):
-            
-    # compute optimal energy
-    x,u,n_err = optimal_input(A,T,B,x0,xf,rho,S)
-    
-    # create figure (FIXME: could the following be shorted?)
-    x_df = pd.DataFrame(x).reset_index().rename(columns={'index':'t'})
-    x_df = x_df.melt(id_vars='t',var_name='Node',value_name='Value')
-    x_df['Type'] = 'x'
-    
-    u_df = pd.DataFrame(u).reset_index().rename(columns={'index':'t'})
-    u_df = u_df.melt(id_vars='t',var_name='Node',value_name='Value')
-    u_df['Type'] = 'u'
-    
-    fig_df = pd.concat([x_df,u_df])
-    fig = px.line(fig_df,x='t',y='Value',color='Node',facet_row='Type')
-    fig.update_layout(title='Optimal Control Energy',title_x=0.5)
-    
-    return fig
-
-###############################################################################
-## Dash App ###################################################################
-###############################################################################
-
-# run dash and take in the list of elements
-app = dash.Dash(external_stylesheets=[dbc.themes.BOOTSTRAP])
-
-# create custom style sheet
-# show node labels
-# Style the border of the nodes depending on if they are controllers
-# and constrained
-stylesheet = [{'selector':'node','style':{'content':'data(label)'}},
-              {'selector': '[?controller][?constrain]','style':{'border-width':2,'border-color':'black','border-style':'solid'}},
-              {'selector':'[?controller][!constrain]','style':{'border-width':2,'border-color':'black','border-style':'dashed'}},
-              {'selector':'[!controller][?constrain]','style':{'border-width':2,'border-color':'black','border-style':'dotted'}},
-              {'selector':'[!controller][!constrain]','style':{}}
-              ]
-
-app.layout = html.Div([
-    dbc.Row([
-        dbc.Col([    
-        # cytoscape graph
-        cyto.Cytoscape(
-            id='cytoscape-compound',
-            layout={'name':'cose'},
-            elements=from_A_to_elements(A), # initialize elements with a function call
-            stylesheet=stylesheet,
-            style={'width':'100%','height':'500px'})
-            ],width=6),
-        dbc.Col([
-            # x0/xf data table 
-            dbc.Row([dash_table.DataTable(id='states-table',
-                                          columns=[{'id':'index','name':'index','type':'numeric'},
-                                                   {'id':'x0','name':'x0','type':'numeric','editable':True},
-                                                   {'id':'xf','name':'xf','type':'numeric','editable':True}],
-                                          data=states_df.to_dict('records'),
-                                          editable=False)],justify='center'),
-            dbc.Row([html.Button('Switch columns',id='switch-state-cols',n_clicks=0,style={'width':'100%'})],justify='center')],
-            width=3),
-        dbc.Col([
-            dbc.Row([dbc.Col([dcc.Input(id='c',type="number",debounce=True,placeholder='Normalization Constant (c)',value=1)])]),
-            dbc.Row([dbc.Col([dcc.Input(id='T',type="number",debounce=True,placeholder='Time Horizon (T)',value=3)]),dbc.Col(html.Button('Plot Trajectories',id='plot-button',n_clicks=0))]),
-            dbc.Row([dbc.Col([dcc.Input(id='rho',type="number",debounce=True,placeholder='rho',value=1)])]),
-            dbc.Row([dbc.Col([html.Button('(Dis-)Connect Nodes',id='edge-button',n_clicks=0)])]),
-            dbc.Row([dbc.Col([html.Button('(Un-)set controll',id='controll-button',n_clicks=0)])]),
-            dbc.Row([dbc.Col([html.Button('(Un-)set constrain',id='constrain-button',n_clicks=0)])]),
-            dbc.Row([dbc.Col([dcc.Input(id='edge-weight',type='number',debounce=True,placeholder='Edge Weight',value=1)]),dbc.Col([html.Button('Set Edge Weight',id='edge-weight-button',n_clicks=0)])])],
-            width=3)
-        ],align='end'),
-    dbc.Row([
-        # figures
-        dbc.Col([dcc.Graph(id='state-trajectory-fig',figure={})],width=4),
-        dbc.Col([dcc.Graph(id='minimum-energy-fig',figure={})],width=4),
-        dbc.Col([dcc.Graph(id='optimal-energy-fig',figure={})],width=4)
-    ],className="g-0"),
-    dbc.Row([
-        # debugging fields (can be deleted when not necessary anymore)
-        dbc.Col([html.Label(children='Selected Nodes:'),html.Pre(id='selected-node-data-json-output')],width=3),
-        dbc.Col([html.Label(children='Selected Edges:'),html.Pre(id='selected-edge-data-json-output')],width=3),
-        dbc.Col([html.Label(children='Current Elements:'),html.Pre(id='current-elements')],width=3),
-        dbc.Col([html.Label(children='Current Stylesheet:'),html.Pre(id='current-stylesheet')],width=3)
-    ],className="g-0")
-])
-
-    
-
-## Just for debugging (can be deleted when not necessary anymore ##############
-
-@app.callback(Output('selected-node-data-json-output','children'),
-              Input('cytoscape-compound','selectedNodeData'),
-              prevent_initial_call=True)
-def displaySelectedNodeData(data):
-    return json.dumps(data,indent=2)
-
-@app.callback(Output('selected-edge-data-json-output','children'),
-              Input('cytoscape-compound','selectedEdgeData'),
-              prevent_initial_call=True)
-def displaySelectedEdgeData(data):
-    return json.dumps(data,indent=2)
-
-@app.callback(Output('current-elements','children'),
-              Input('cytoscape-compound','elements'),
-              prevent_initial_call=True)
-def displayCurrentElements(elements):
-    return json.dumps(elements,indent=2)
-
-@app.callback(Output('current-stylesheet','children'),
-              Input('cytoscape-compound','stylesheet'),
-              prevent_initial_call=True)
-def displayCurrentStylesheet(elements):
-    return json.dumps(elements,indent=2)
-
-## Callback Functions #########################################################
-
-@app.callback(Output('cytoscape-compound','elements'),
-              Input('edge-button','n_clicks'),
-              Input('controll-button','n_clicks'),
-              Input('constrain-button','n_clicks'),
-              Input('edge-weight-button','n_clicks'),
-              State('edge-weight','value'),
-              State('cytoscape-compound','selectedNodeData'),
-              State('cytoscape-compound','selectedEdgeData'),
-              State('cytoscape-compound','elements'),
-              prevent_initial_call=True)
-def updateElements(edge_button,controll_button,constrain_button,edge_weight_button,edge_weight,selectedNodeData,selectedEdgeData,elements):
-    
-    print('UpdateElements was fired')
-    
-    # check which button was triggered
-    ctx = dash.callback_context
-    button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    
-    # add or delete edges
-    if button_id == 'edge-button':
-        
-        # FIXME: Is that true? Couldn't we merge add_edges and drop_edges?
-        # user must exclusively selecte either at least two nodes or one edge 
-        # but not both nodes and edges at the same time
-        if len(selectedNodeData) > 0 and len(selectedEdgeData) > 0:
-            return elements
-        
-        if len(selectedNodeData) >= 2 and len(selectedEdgeData) == 0:
-            return add_edges(selectedNodeData,edge_weight,elements)
-        
-        if len(selectedNodeData) == 0 and len(selectedEdgeData) >= 1:
-            return drop_edges(selectedEdgeData,elements)
-        
+        if action == "add-node":
+            store["elements"], new_id = add_node(store["elements"])
+            store["states"].append({"id": new_id, "x0": 0.0, "xf": 0.0})
+            message = f"Added node {new_id}."
+        elif action == "delete-node":
+            if not selected:
+                raise ValueError("Select at least one node to delete")
+            if len(selected) >= len(node_ids(store["elements"])):
+                raise ValueError("The network must contain at least one node")
+            store["elements"] = delete_nodes(store["elements"], selected)
+            store["states"] = [row for row in store["states"] if str(row["id"]) not in set(selected)]
+            message = f"Deleted {len(selected)} node(s); remaining IDs were preserved."
+        elif action == "toggle-edge":
+            store["elements"] = toggle_edges(store["elements"], selected_nodes, selected_edges, edge_weight)
+            message = "Updated the selected connections."
+        elif action == "toggle-controller":
+            if not selected:
+                raise ValueError("Select at least one node")
+            store["elements"] = toggle_node_flag(store["elements"], selected, "controller")
+            message = "Updated controller nodes."
+        elif action == "toggle-constraint":
+            if not selected:
+                raise ValueError("Select at least one node")
+            store["elements"] = toggle_node_flag(store["elements"], selected, "constrain")
+            message = "Updated constrained nodes."
+        elif action == "set-edge-weight":
+            if not selected_edges:
+                raise ValueError("Select at least one edge")
+            store["elements"] = update_edge_weight(store["elements"], selected_edges, edge_weight)
+            message = "Updated edge weights."
+        elif action == "switch-states":
+            for row in store["states"]:
+                row["x0"], row["xf"] = row["xf"], row["x0"]
+            message = "Switched x0 and xf."
         else:
-            return elements
-    
-    # modify edge weights
-    elif button_id == 'edge-weight-button':
-        return set_edge_weights(selectedEdgeData,edge_weight,elements)
-        
-    # set or unset controll nodes
-    elif button_id == 'controll-button':
+            return no_update, no_update
+        return store, message
+    except (KeyError, TypeError, ValueError) as error:
+        return no_update, f"Could not update network: {error}"
 
-        # get a list of ids of all nodes that user has currently selected and for
-        # which controll state should be switched
-        node_ids = [d['id'] for d in selectedNodeData]
-        
-        # identify node dicts in elements and toggle their 'controller' attribute 
-        # if they are part of the selected nodes
-        node_dicts = get_node_dicts(elements)
-        
-        for d in node_dicts:
-            if d['data']['id'] in node_ids:
-                d['data']['controller'] = not d['data']['controller']
-                
-        return elements
-    
-    elif button_id == 'constrain-button':
-        
-        # get a list of ids of all nodes that user has currently selected and for
-        # which controll state should be switched
-        node_ids = [d['id'] for d in selectedNodeData]
-        
-        # identify node dicts in elements and toggle their 'controller' attribute 
-        # if they are part of the selected nodes
-        node_dicts = get_node_dicts(elements)
-        
-        for d in node_dicts:
-            if d['data']['id'] in node_ids:
-                d['data']['constrain'] = not d['data']['constrain']
-        
-        return elements
 
-# TODO: This callback is currently always fired when elements are changed.
-# But it actually only needs to be fired when either the minimum or maximum
-# edge weights change
-@app.callback(Output('cytoscape-compound','stylesheet'),
-              Input('cytoscape-compound','elements'),
-              State('cytoscape-compound','stylesheet'))
-def updateEdgeStyle(elements,stylesheet):
-    
-    weights_min,weights_max = get_edge_min_max(elements)
-    
-    # add (or overwrite) edge style
-    if not any([d['selector'] == 'edge' for d in stylesheet]):
-        stylesheet.append({'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}})
-    else:
-        edge_style_idx = [i for i,d in enumerate(stylesheet) if d['selector'] == 'edge'][0]
-        stylesheet[edge_style_idx] = {'selector':'edge','style':{'width':f"mapData(weight,{weights_min},{weights_max},1,5)"}}
-    
-    return stylesheet
+@app.callback(
+    Output("cytoscape", "elements"),
+    Output("cytoscape", "stylesheet"),
+    Output("states-table", "data"),
+    Output("c", "value"),
+    Output("T", "value"),
+    Output("rho", "value"),
+    Output("topology-metrics", "children"),
+    Input("network-store", "data"),
+    prevent_initial_call=True,
+)
+def render_network(store):
+    return (
+        store["elements"],
+        stylesheet_for(store["elements"]),
+        store["states"],
+        store["c"],
+        store["T"],
+        store["rho"],
+        metric_cards(store["elements"]),
+    )
 
-@app.callback(Output('states-table','data'),
-              Input('switch-state-cols','n_clicks'),
-              State('states-table','derived_virtual_data'),
-              prevent_initial_call=True)
-def switchStateColums(n_clicks,states_data):
-    
-    print(states_data)
-    
-    states_data_copy = states_data.copy()
-    
-    for d in states_data_copy:
-        d['x0'],d['xf'] = d['xf'],d['x0']
-    
-    return states_data_copy
 
-@app.callback(Output('state-trajectory-fig','figure'),
-              Output('minimum-energy-fig','figure'),
-              Output('optimal-energy-fig','figure'),
-              Input('plot-button','n_clicks'),
-              State('cytoscape-compound','elements'),
-              State('T','value'),
-              State('c','value'),
-              State('rho','value'),
-              State('states-table','derived_virtual_data'),
-              prevent_initial_call=True)
-def updateFigures(n_clicks,elements,T,c,rho,states_data):
-    
-    # debugging
-    print('UpdateFigures was fired')
-        
-    # digest data for network_control package
-    A = from_elements_to_A(elements)
-    B = from_elements_to_B(elements)
-    S = from_elements_to_S(elements)
-    
-    # debugging
-    print(f"This is A:\n{A}\n")
-    print(f"This is B:\n{B}\n")
-    print(f"This is S:\n{S}\n")
-    
-    # normalize A
-    # FIXME: It should also be possible to not normalize the matrix (i.o.
-    # to get an intuition for what happens when you not apply normalization)
-    A = matrix_normalization(A,c)
-    
-    # FIXME: Currently we use reshape (-1,1), but this is a bug in network
-    # control-package. When this is fixed, we don't need reshape anymore
-    x0 = np.array([d['x0'] for d in states_data]).reshape(-1,1)
-    xf = np.array([d['xf'] for d in states_data]).reshape(-1,1)
-    
-    # debugging
-    print(f"This is x0:\n{x0}\n")
-    print(f"This is xf:\n{xf}\n")
-        
-    fig_1 = get_state_trajectory_fig(A,x0=x0,T=T,c=c)
-    fig_2 = get_minimum_energy_figure(A=A,T=T,B=B,x0=x0,xf=xf,c=c)
-    fig_3 = get_optimal_energy_figure(A=A,T=T,B=B,x0=x0,xf=xf,rho=rho,S=S,c=c)
-    
-    return fig_1,fig_2,fig_3
-    
-if __name__ == '__main__':
-    app.run_server(debug=True,use_reloader=False)
+@app.callback(
+    Output("state-trajectory", "figure"),
+    Output("minimum-energy", "figure"),
+    Output("optimal-energy", "figure"),
+    Output("aggregate-energy", "figure"),
+    Output("plot-status", "children"),
+    Input("plot", "n_clicks"),
+    State("network-store", "data"),
+    State("states-table", "data"),
+    State("c", "value"),
+    State("T", "value"),
+    State("rho", "value"),
+    prevent_initial_call=True,
+)
+def update_figures(_clicks, store, state_rows, c, time_horizon, rho):
+    try:
+        if not isinstance(time_horizon, int) or isinstance(time_horizon, bool) or time_horizon < 1:
+            raise ValueError("T must be a positive integer")
+        if c is None or float(c) <= 0 or rho is None or float(rho) <= 0:
+            raise ValueError("c and rho must be positive")
+
+        adjacency, control, constraint, ids = matrices_from_elements(store["elements"])
+        if not ids:
+            raise ValueError("The network has no nodes")
+        rows = {str(row["id"]): row for row in state_rows}
+        if any(node_id not in rows for node_id in ids):
+            raise ValueError("State values are missing for one or more nodes")
+        x0 = np.asarray([rows[node_id]["x0"] for node_id in ids], dtype=float).reshape(-1, 1)
+        xf = np.asarray([rows[node_id]["xf"] for node_id in ids], dtype=float).reshape(-1, 1)
+        normalized = matrix_normalization(adjacency, float(c))
+
+        uncontrolled = state_trajectory(normalized, x0, time_horizon)
+        minimum_x, minimum_u, _minimum_error = minimum_input(
+            normalized, time_horizon, control, x0, xf
+        )
+        optimal_x, optimal_u, _optimal_error = optimal_input(
+            normalized, time_horizon, control, x0, xf, float(rho), constraint
+        )
+        return (
+            trajectory_figure(uncontrolled, ids, "Uncontrolled state trajectory"),
+            control_figure(minimum_x, minimum_u, ids, "Minimum control energy"),
+            control_figure(optimal_x, optimal_u, ids, "Optimal control energy"),
+            energy_figure(minimum_u, optimal_u, ids),
+            "",
+        )
+    except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as error:
+        return no_update, no_update, no_update, no_update, f"Could not compute figures: {error}"
+
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=8050, debug=False)
