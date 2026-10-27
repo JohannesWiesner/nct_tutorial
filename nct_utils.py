@@ -1,354 +1,119 @@
-"""Pure data and numerical helpers for the NCT tutorial application.
+"""Numerical model for the network control tutorial.
 
-The Dash layer delegates network mutations to this module so they can be
-tested without a browser (or even Dash) being installed.
+This module accepts arrays and returns arrays/scalars. nctpy supplies the
+discrete-time control solver and normalization; bct supplies topology metrics.
+It has no dependency on Dash, Plotly, or Cytoscape element dictionaries.
 """
 
 from __future__ import annotations
 
-from copy import deepcopy
-from typing import Any, Iterable, Mapping
+from dataclasses import dataclass
 
+import bct
 import numpy as np
+from nctpy.energies import get_control_inputs
+from nctpy.utils import matrix_normalization
 
 
-def node_sort_key(node_id: str) -> tuple[int, int | str]:
-    """Sort numeric Cytoscape IDs numerically and other IDs lexically."""
-    text = str(node_id)
-    try:
-        return (0, int(text))
-    except ValueError:
-        return (1, text)
+@dataclass(frozen=True)
+class ControlSolution:
+    """One control solution, independent of its eventual visualization.
 
-
-def split_elements(elements: Mapping[str, list] | list) -> dict[str, list]:
-    """Return elements as an explicit ``nodes``/``edges`` mapping.
-
-    A flat list is accepted for backwards compatibility. Each element is
-    inspected only once.
+    states has shape (T+1, N), inputs has shape (T, N), and energy contains
+    N sums of squared inputs. errors retains the solver's two residuals.
     """
-    if isinstance(elements, Mapping):
-        return {
-            "nodes": deepcopy(list(elements.get("nodes", []))),
-            "edges": deepcopy(list(elements.get("edges", []))),
-        }
 
-    grouped: dict[str, list] = {"nodes": [], "edges": []}
-    for element in elements or []:
-        data = element.get("data", {})
-        group = "edges" if "source" in data and "target" in data else "nodes"
-        grouped[group].append(deepcopy(element))
-    return grouped
+    states: np.ndarray
+    inputs: np.ndarray
+    energy: np.ndarray
+    errors: tuple[float, float]
 
 
-def node_ids(elements: Mapping[str, list] | list) -> list[str]:
-    grouped = split_elements(elements)
-    return sorted(
-        (str(node["data"]["id"]) for node in grouped["nodes"]),
-        key=node_sort_key,
-    )
+@dataclass(frozen=True)
+class ControlResults:
+    """Normalized dynamics and all numerical results needed by the tutorial.
+
+    uncontrolled includes states from t=0 through T. Both control solutions
+    use the same normalized adjacency matrix, time steps, and node ordering.
+    """
+
+    normalized_adjacency: np.ndarray
+    uncontrolled: np.ndarray
+    minimum: ControlSolution
+    optimal: ControlSolution
 
 
-def from_adjacency_matrix(
-    adjacency: np.ndarray,
-    controller: Iterable[bool] | None = None,
-    constrain: Iterable[bool] | None = None,
-) -> dict[str, list]:
-    """Convert a square adjacency matrix to explicit Cytoscape elements."""
-    matrix = np.asarray(adjacency, dtype=float)
+def _square_matrix(values: np.ndarray, name: str) -> np.ndarray:
+    """Copy a finite square array or raise an error naming the input."""
+    matrix = np.asarray(values, dtype=float)
     if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
-        raise ValueError("A must be a square matrix")
+        raise ValueError(f"{name} must be a square matrix")
     if not np.all(np.isfinite(matrix)):
-        raise ValueError("A must contain only finite values")
-    if not np.allclose(matrix, matrix.T):
-        raise ValueError("A must be symmetric for this undirected tutorial")
-
-    size = matrix.shape[0]
-    controllers = list(controller) if controller is not None else [True] * size
-    constraints = list(constrain) if constrain is not None else [True] * size
-    if len(controllers) != size or len(constraints) != size:
-        raise ValueError("B and S must describe every node in A")
-
-    nodes = []
-    for index in range(size):
-        angle = 2 * np.pi * index / max(size, 1)
-        nodes.append(
-            {
-                "data": {
-                    "id": str(index),
-                    "label": str(index),
-                    "controller": bool(controllers[index]),
-                    "constrain": bool(constraints[index]),
-                },
-                "position": {
-                    "x": float(220 + 180 * np.cos(angle)),
-                    "y": float(220 + 180 * np.sin(angle)),
-                },
-            }
-        )
-
-    edges = []
-    for source in range(size):
-        for target in range(source + 1, size):
-            weight = float(matrix[source, target])
-            if weight != 0:
-                edges.append(
-                    {
-                        "data": {
-                            "id": f"{source}--{target}",
-                            "source": str(source),
-                            "target": str(target),
-                            "weight": weight,
-                        }
-                    }
-                )
-    return {"nodes": nodes, "edges": edges}
-
-
-def _diagonal_flags(matrix: Any, size: int, name: str) -> list[bool]:
-    if matrix is None:
-        return [True] * size
-    value = np.asarray(matrix, dtype=float)
-    if value.shape != (size, size):
-        raise ValueError(f"{name} must have shape {size}x{size}")
-    if not np.all(np.isfinite(value)):
         raise ValueError(f"{name} must contain only finite values")
-    if not np.allclose(value, np.diag(np.diag(value))):
-        raise ValueError(f"{name} must be diagonal")
-    return [bool(item) for item in np.diag(value)]
+    return matrix.copy()
 
 
-def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Validate an uploaded NCT configuration and return JSON-safe values."""
-    if not isinstance(payload, Mapping):
-        raise ValueError("The uploaded JSON document must contain an object")
-    if "A" not in payload:
-        raise ValueError("The uploaded JSON document must include A")
-
-    adjacency = np.asarray(payload["A"], dtype=float)
-    if adjacency.ndim != 2 or adjacency.shape[0] != adjacency.shape[1]:
-        raise ValueError("A must be a square matrix")
-    size = adjacency.shape[0]
-    controllers = _diagonal_flags(payload.get("B"), size, "B")
-    constraints = _diagonal_flags(payload.get("S"), size, "S")
-
-    def vector(name: str, fallback: np.ndarray) -> list[float]:
-        value = np.asarray(payload.get(name, fallback), dtype=float).reshape(-1)
-        if value.size != size or not np.all(np.isfinite(value)):
-            raise ValueError(f"{name} must contain {size} finite values")
-        return value.tolist()
-
-    def positive_number(name: str, default: float) -> float:
-        value = float(payload.get(name, default))
-        if not np.isfinite(value) or value <= 0:
-            raise ValueError(f"{name} must be a positive number")
-        return value
-
-    time_horizon = payload.get("T", 3)
-    if isinstance(time_horizon, bool) or int(time_horizon) != float(time_horizon):
+def _positive_horizon(value: int) -> int:
+    """Accept an integer-valued positive horizon, excluding booleans/NaN."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError("T must be a positive integer") from error
+    if (isinstance(value, (bool, np.bool_)) or not np.isfinite(number)
+            or number < 1 or not number.is_integer()):
         raise ValueError("T must be a positive integer")
-    time_horizon = int(time_horizon)
-    if time_horizon < 1:
-        raise ValueError("T must be a positive integer")
-
-    x0_values = vector("x0", np.zeros(size))
-    xf_values = vector("xf", np.zeros(size))
-    return {
-        "elements": from_adjacency_matrix(adjacency, controllers, constraints),
-        "states": [
-            {"id": str(index), "x0": x0, "xf": xf}
-            for index, (x0, xf) in enumerate(zip(x0_values, xf_values))
-        ],
-        "c": positive_number("c", 1.0),
-        "T": time_horizon,
-        "rho": positive_number("rho", 1.0),
-    }
+    return int(number)
 
 
-def next_node_id(elements: Mapping[str, list] | list) -> str:
-    existing = set(node_ids(elements))
-    candidate = 0
-    while str(candidate) in existing:
-        candidate += 1
-    return str(candidate)
+def _positive_number(value: float, name: str) -> float:
+    """Convert a scalar model parameter to a finite positive float."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{name} must be a positive number") from error
+    if not np.isfinite(number) or number <= 0:
+        raise ValueError(f"{name} must be a positive number")
+    return number
 
 
-def add_node(elements: Mapping[str, list] | list) -> tuple[dict[str, list], str]:
-    grouped = split_elements(elements)
-    new_id = next_node_id(grouped)
-    grouped["nodes"].append(
-        {
-            "data": {
-                "id": new_id,
-                "label": new_id,
-                "controller": True,
-                "constrain": True,
-            }
-        }
-    )
-    return grouped, new_id
+def _state_vector(values: np.ndarray, size: int, name: str) -> np.ndarray:
+    """Read a flat/column state vector with one finite value per node."""
+    vector = np.asarray(values, dtype=float).reshape(-1)
+    if vector.size != size or not np.all(np.isfinite(vector)):
+        raise ValueError(f"{name} must contain {size} finite values")
+    return vector
 
 
-def delete_nodes(
-    elements: Mapping[str, list] | list, selected_ids: Iterable[str]
-) -> dict[str, list]:
-    """Delete nodes and incident edges while preserving all other IDs."""
-    grouped = split_elements(elements)
-    selected = {str(value) for value in selected_ids}
-    grouped["nodes"] = [
-        node for node in grouped["nodes"] if str(node["data"]["id"]) not in selected
-    ]
-    grouped["edges"] = [
-        edge
-        for edge in grouped["edges"]
-        if str(edge["data"]["source"]) not in selected
-        and str(edge["data"]["target"]) not in selected
-    ]
-    return grouped
+def topology_metrics(adjacency: np.ndarray) -> dict[str, float | int]:
+    """Compute scalar summaries of an undirected adjacency matrix with bct.
 
-
-def toggle_node_flag(
-    elements: Mapping[str, list] | list,
-    selected_ids: Iterable[str],
-    flag: str,
-) -> dict[str, list]:
-    if flag not in {"controller", "constrain"}:
-        raise ValueError("Unknown node flag")
-    grouped = split_elements(elements)
-    selected = {str(value) for value in selected_ids}
-    for node in grouped["nodes"]:
-        if str(node["data"]["id"]) in selected:
-            node["data"][flag] = not bool(node["data"].get(flag, True))
-    return grouped
-
-
-def update_edge_weight(
-    elements: Mapping[str, list] | list,
-    selected_edges: Iterable[Mapping[str, Any]],
-    weight: float,
-) -> dict[str, list]:
-    grouped = split_elements(elements)
-    numeric_weight = float(weight)
-    if not np.isfinite(numeric_weight) or numeric_weight <= 0:
-        raise ValueError("Edge weight must be a positive number")
-    selected = {
-        frozenset((str(edge["source"]), str(edge["target"])))
-        for edge in selected_edges
-    }
-    for edge in grouped["edges"]:
-        pair = frozenset((str(edge["data"]["source"]), str(edge["data"]["target"])))
-        if pair in selected:
-            edge["data"]["weight"] = numeric_weight
-    return grouped
-
-
-def toggle_edges(
-    elements: Mapping[str, list] | list,
-    selected_nodes: Iterable[Mapping[str, Any]],
-    selected_edges: Iterable[Mapping[str, Any]],
-    weight: float,
-) -> dict[str, list]:
-    grouped = split_elements(elements)
-    nodes = [str(node["id"]) for node in selected_nodes]
-    edges = list(selected_edges)
-    if nodes and edges:
-        raise ValueError("Select nodes or edges, not both")
-    if edges:
-        selected = {
-            frozenset((str(edge["source"]), str(edge["target"]))) for edge in edges
-        }
-        grouped["edges"] = [
-            edge
-            for edge in grouped["edges"]
-            if frozenset(
-                (str(edge["data"]["source"]), str(edge["data"]["target"]))
-            )
-            not in selected
-        ]
-        return grouped
-    if len(nodes) < 2:
-        raise ValueError("Select at least two nodes to connect")
-
-    numeric_weight = float(weight)
-    if not np.isfinite(numeric_weight) or numeric_weight <= 0:
-        raise ValueError("Edge weight must be a positive number")
-    existing = {
-        frozenset((str(edge["data"]["source"]), str(edge["data"]["target"])))
-        for edge in grouped["edges"]
-    }
-    ordered = sorted(set(nodes), key=node_sort_key)
-    for source_index, source in enumerate(ordered):
-        for target in ordered[source_index + 1 :]:
-            pair = frozenset((source, target))
-            if pair not in existing:
-                grouped["edges"].append(
-                    {
-                        "data": {
-                            "id": f"{source}--{target}",
-                            "source": source,
-                            "target": target,
-                            "weight": numeric_weight,
-                        }
-                    }
-                )
-                existing.add(pair)
-    return grouped
-
-
-def matrices_from_elements(
-    elements: Mapping[str, list] | list,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, list[str]]:
-    """Build A, B and S together from one normalized element collection."""
-    grouped = split_elements(elements)
-    ids = sorted(
-        (str(node["data"]["id"]) for node in grouped["nodes"]), key=node_sort_key
-    )
-    positions = {node_id: index for index, node_id in enumerate(ids)}
-    size = len(ids)
-    adjacency = np.zeros((size, size), dtype=float)
-    for edge in grouped["edges"]:
-        data = edge["data"]
-        source, target = str(data["source"]), str(data["target"])
-        if source not in positions or target not in positions:
-            continue
-        i, j = positions[source], positions[target]
-        adjacency[i, j] = adjacency[j, i] = float(data.get("weight", 1))
-
-    node_by_id = {str(node["data"]["id"]): node["data"] for node in grouped["nodes"]}
-    control = np.diag([float(bool(node_by_id[item].get("controller", True))) for item in ids])
-    constraint = np.diag([float(bool(node_by_id[item].get("constrain", True))) for item in ids])
-    return adjacency, control, constraint, ids
-
-
-def topology_metrics(elements: Mapping[str, list] | list) -> dict[str, float | int]:
-    """Compute compact undirected structural-connectivity measures."""
-    adjacency, _, _, _ = matrices_from_elements(elements)
-    size = adjacency.shape[0]
-    binary = adjacency != 0
-    edge_count = int(np.count_nonzero(np.triu(binary, 1)))
-    density = 0.0 if size < 2 else 2 * edge_count / (size * (size - 1))
-    degree = binary.sum(axis=1) if size else np.array([])
-    strength = np.abs(adjacency).sum(axis=1) if size else np.array([])
-
-    clustering_values = []
-    for node in range(size):
-        neighbors = np.flatnonzero(binary[node])
-        possible = len(neighbors) * (len(neighbors) - 1) / 2
-        actual = np.count_nonzero(np.triu(binary[np.ix_(neighbors, neighbors)], 1))
-        clustering_values.append(0.0 if possible == 0 else actual / possible)
-
+    Nonzero edges define binary density, degree, and clustering; strength
+    uses absolute weights, preserving the tutorial's convention for signed
+    uploads. Self-loops are ignored. Empty and one-node graphs are supported.
+    """
+    matrix = _square_matrix(adjacency, "A")
+    if not np.allclose(matrix, matrix.T):
+        raise ValueError("A must be symmetric for undirected topology metrics")
+    np.fill_diagonal(matrix, 0)
+    size = len(matrix)
+    binary = (matrix != 0).astype(float)
+    density, _, edges = bct.density_und(binary) if size > 1 else (0.0, size, 0)
     return {
         "nodes": size,
-        "edges": edge_count,
+        "edges": int(edges),
         "density": float(density),
-        "mean_degree": float(degree.mean()) if size else 0.0,
-        "mean_strength": float(strength.mean()) if size else 0.0,
-        "mean_clustering": float(np.mean(clustering_values)) if size else 0.0,
+        "mean_degree": float(np.mean(bct.degrees_und(binary))) if size else 0.0,
+        "mean_strength": float(np.mean(bct.strengths_und(np.abs(matrix)))) if size else 0.0,
+        "mean_clustering": float(np.mean(bct.clustering_coef_bu(binary))) if size else 0.0,
     }
 
 
 def aggregate_control_energy(control_input: np.ndarray) -> np.ndarray:
-    """Return discrete control energy per node, summed across time."""
+    """Sum squared discrete control inputs over time for each node.
+
+    The input has shape (time steps, nodes); the result has one value per
+    node. This is a discrete sum, not continuous-time numerical integration.
+    """
     values = np.asarray(control_input, dtype=float)
     if values.ndim != 2:
         raise ValueError("Control input must be a two-dimensional array")
@@ -358,22 +123,86 @@ def aggregate_control_energy(control_input: np.ndarray) -> np.ndarray:
 def state_trajectory(
     adjacency: np.ndarray, initial_state: np.ndarray, time_horizon: int
 ) -> np.ndarray:
-    """Simulate ``x(t + 1) = A x(t)`` for a positive integer horizon."""
-    matrix = np.asarray(adjacency, dtype=float)
-    if matrix.ndim != 2 or matrix.shape[0] != matrix.shape[1]:
-        raise ValueError("A must be a square matrix")
-    if (
-        isinstance(time_horizon, bool)
-        or int(time_horizon) != time_horizon
-        or time_horizon < 1
-    ):
-        raise ValueError("T must be a positive integer")
-    state = np.asarray(initial_state, dtype=float).reshape(-1)
-    if state.size != matrix.shape[0]:
-        raise ValueError("The initial state must have one value per node")
+    """Simulate uncontrolled discrete dynamics x(t+1) = A x(t).
 
-    trajectory = np.zeros((int(time_horizon), matrix.shape[0]))
-    for time_point in range(int(time_horizon)):
+    A must already be normalized. Return time_horizon rows, starting with
+    the initial state at t=0; callers requesting states through t=T pass
+    T+1. This also supports a single time point and performs no plotting.
+    """
+    matrix = _square_matrix(adjacency, "A")
+    count = _positive_horizon(time_horizon)
+    state = _state_vector(initial_state, len(matrix), "x0")
+    trajectory = np.zeros((count, len(matrix)))
+    for time_point in range(count):
         trajectory[time_point] = state
         state = matrix @ state
     return trajectory
+
+
+def _solution(states: np.ndarray, inputs: np.ndarray, errors) -> ControlSolution:
+    """Package a solver result and compute its per-node discrete energy."""
+    return ControlSolution(
+        states=states,
+        inputs=inputs,
+        energy=aggregate_control_energy(inputs),
+        errors=(float(errors[0]), float(errors[1])),
+    )
+
+
+def compute_control_results(
+    adjacency: np.ndarray,
+    control: np.ndarray,
+    constraint: np.ndarray,
+    initial_state: np.ndarray,
+    target_state: np.ndarray,
+    time_horizon: int,
+    *,
+    c: float = 1.0,
+    rho: float = 1.0,
+) -> ControlResults:
+    """Compute uncontrolled, minimum-energy, and optimal-control trajectories.
+
+    A, B (control), and S (constraint) are N-by-N arrays in the same node
+    order as the two state vectors. c controls nctpy's discrete normalization;
+    T is a positive number of steps. Minimum energy uses S=0. Optimal control
+    uses the supplied S and rho to penalize state magnitude and input cost.
+
+    nctpy solves horizons of two or more steps. For T=1, solve B u = xf-A x0
+    directly: fixed endpoints leave no intermediate state cost, so minimum
+    and optimal inputs coincide. An unreachable one-step target raises
+    ValueError. Solver residuals are retained in each ControlSolution.
+    """
+    matrix = _square_matrix(adjacency, "A")
+    size = len(matrix)
+    if not size:
+        raise ValueError("The network has no nodes")
+    B = _square_matrix(control, "B")
+    S = _square_matrix(constraint, "S")
+    if B.shape != matrix.shape or S.shape != matrix.shape:
+        raise ValueError("B and S must have the same shape as A")
+    x0 = _state_vector(initial_state, size, "x0")
+    xf = _state_vector(target_state, size, "xf")
+    horizon = _positive_horizon(time_horizon)
+    normalization = _positive_number(c, "c")
+    weight = _positive_number(rho, "rho")
+    normalized = matrix_normalization(matrix, system="discrete", c=normalization)
+
+    if horizon == 1:
+        required_change = xf - normalized @ x0
+        inputs = np.linalg.lstsq(B, required_change, rcond=None)[0]
+        residual = float(np.linalg.norm(B @ inputs - required_change))
+        if not np.allclose(B @ inputs, required_change, rtol=1e-7, atol=1e-9):
+            raise ValueError("The target state is unreachable in one step with these controllers")
+        minimum = _solution(np.vstack((x0, xf)), inputs.reshape(1, -1), (residual, residual))
+        optimal = minimum
+    else:
+        arguments = dict(A_norm=normalized, T=horizon, B=B, x0=x0, xf=xf, system="discrete")
+        minimum = _solution(*get_control_inputs(**arguments, rho=1.0, S=np.zeros_like(S)))
+        optimal = _solution(*get_control_inputs(**arguments, rho=weight, S=S))
+
+    return ControlResults(
+        normalized_adjacency=normalized,
+        uncontrolled=state_trajectory(normalized, x0, horizon + 1),
+        minimum=minimum,
+        optimal=optimal,
+    )
