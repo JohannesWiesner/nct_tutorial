@@ -6,7 +6,7 @@ COPY environment.yml requirements.txt ./
 RUN conda env create -f environment.yml \
     && conda clean --all --yes
 
-COPY app.py nct_utils.py ./
+COPY app.py graph_utils.py nct_utils.py view_utils.py ./
 COPY assets ./assets
 
 ENV PATH=/opt/conda/envs/nct-tutorial/bin:$PATH \

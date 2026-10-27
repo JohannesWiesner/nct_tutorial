@@ -1,6 +1,6 @@
 # Network Control Theory tutorial
 
-An interactive Dash application for learning [Network Control Theory](https://github.com/BassettLab/control_package).
+An interactive Dash application for learning [Network Control Theory](https://github.com/LindenParkesLab/nctpy).
 
 ![Application preview](preview.png)
 
@@ -53,9 +53,40 @@ Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matric
 
 See [`example-config.json`](example-config.json) for a ready-to-upload example.
 
+## Code organization
+
+| Module | Responsibility |
+| --- | --- |
+| `nct_utils.py` | Numerical model: nctpy normalization/control solutions, bct topology metrics, and energy aggregation. Accepts arrays and returns numerical results. |
+| `graph_utils.py` | Cytoscape editing, upload validation, UI state, and conversion between graph elements and model arrays. |
+| `view_utils.py` | Cytoscape styles, persistent parameter labels, topology cards, and Plotly figures. Consumes precomputed metrics and energies. |
+| `app.py` | Dash layout and controller callbacks that coordinate the helpers. |
+
+Graph helpers previously imported from `nct_utils` now live in `graph_utils`.
+Each helper documents its input format, return values, and relevant conventions.
+
+## Numerical conventions
+
+All trajectories use discrete dynamics, `x(t+1) = A_normalized x(t) + B u(t)`.
+`c` is passed explicitly to nctpy's discrete normalization. `T` is the number
+of transitions: plots contain `T+1` states and `T` control inputs. `rho`
+weights control-input cost in the optimal solution; minimum-energy control
+uses a zero state-constraint matrix. Energy per node is the sum of squared
+inputs across the `T` steps.
+
+This replaces the earlier combination of discrete state simulation and a
+continuous control solver. nctpy handles `T >= 2`; the one-step case is solved
+directly from `B u = xf - A_normalized x0`, with unreachable targets reported
+as input errors. Both control solutions retain the solver's numerical residuals.
+
+Topology cards use bct's undirected density, degree, and binary clustering.
+Mean strength uses absolute edge weights. Self-loops are excluded from these
+summaries, and empty/single-node networks return zero connectivity measures.
+
 ## Test
 
-The core network and numerical helpers use the standard-library test runner:
+After installing the app requirements, run the model, graph-adapter, view,
+and callback tests with the standard-library test runner:
 
 ```bash
 python -m unittest discover -s tests -v

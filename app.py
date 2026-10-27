@@ -2,33 +2,33 @@
 
 from __future__ import annotations
 
-import base64
-import json
-
 import numpy as np
-import pandas as pd
-import plotly.express as px
 import plotly.graph_objects as go
 from dash import ClientsideFunction, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
-from network_control.energies import minimum_input, optimal_input
-from network_control.utils import matrix_normalization
 
-from nct_utils import (
+from graph_utils import (
     add_node,
-    aggregate_control_energy,
+    decode_upload,
+    default_store,
     delete_nodes,
-    from_adjacency_matrix,
     matrices_from_elements,
+    merge_state_edits,
     node_ids,
-    split_elements,
-    state_trajectory,
+    states_from_rows,
     toggle_edges,
     toggle_node_flag,
-    topology_metrics,
     update_edge_weight,
-    validate_configuration,
+)
+from nct_utils import compute_control_results, topology_metrics
+from view_utils import (
+    control_figure,
+    energy_figure,
+    metric_cards,
+    parameter_controls,
+    stylesheet_for,
+    trajectory_figure,
 )
 
 
@@ -48,154 +48,7 @@ DEFAULT_ADJACENCY = np.array(
 )
 
 
-def default_store() -> dict:
-    rng = np.random.default_rng(28)
-    ids = [str(index) for index in range(len(DEFAULT_ADJACENCY))]
-    return {
-        "elements": from_adjacency_matrix(DEFAULT_ADJACENCY),
-        "states": [
-            {"id": node_id, "x0": round(float(x0), 2), "xf": round(float(xf), 2)}
-            for node_id, x0, xf in zip(ids, rng.random(len(ids)), rng.random(len(ids)))
-        ],
-        "c": 1.0,
-        "T": 3,
-        "rho": 1.0,
-    }
-
-
-def stylesheet_for(elements: dict) -> list[dict]:
-    grouped = split_elements(elements)
-    weights = [float(edge["data"].get("weight", 1)) for edge in grouped["edges"]]
-    low = min(weights, default=1.0)
-    high = max(weights, default=1.0)
-    if np.isclose(low, high):
-        high = low + 1.0
-    return [
-        {"selector": "node", "style": {"content": "data(label)"}},
-        {
-            "selector": "[?controller][?constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "solid"},
-        },
-        {
-            "selector": "[?controller][!constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "dashed"},
-        },
-        {
-            "selector": "[!controller][?constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "dotted"},
-        },
-        {"selector": "[!controller][!constrain]", "style": {}},
-        {
-            "selector": "edge",
-            "style": {"width": f"mapData(weight,{low},{high},1,6)", "label": "data(weight)"},
-        },
-    ]
-
-
-def metric_cards(elements: dict) -> list:
-    labels = {
-        "nodes": "Nodes",
-        "edges": "Edges",
-        "density": "Density",
-        "mean_degree": "Mean degree",
-        "mean_strength": "Mean strength",
-        "mean_clustering": "Mean clustering",
-    }
-    metrics = topology_metrics(elements)
-    return [
-        dbc.Col(
-            dbc.Card(
-                dbc.CardBody(
-                    [
-                        html.Small(labels[key], className="text-muted"),
-                        html.H5(value if isinstance(value, int) else f"{value:.3f}"),
-                    ]
-                )
-            ),
-            xs=6,
-            md=2,
-        )
-        for key, value in metrics.items()
-    ]
-
-
-def decode_upload(contents: str) -> dict:
-    if not contents or "," not in contents:
-        raise ValueError("Choose a JSON configuration file")
-    _, encoded = contents.split(",", 1)
-    try:
-        payload = json.loads(base64.b64decode(encoded, validate=True).decode("utf-8"))
-    except (ValueError, UnicodeDecodeError, json.JSONDecodeError) as error:
-        raise ValueError("The upload is not valid UTF-8 JSON") from error
-    return validate_configuration(payload)
-
-
-def merge_state_edits(store: dict, rows: list[dict] | None) -> dict:
-    if rows is None:
-        return store
-    valid_ids = set(node_ids(store["elements"]))
-    store["states"] = [
-        {"id": str(row["id"]), "x0": float(row["x0"]), "xf": float(row["xf"])}
-        for row in rows
-        if str(row.get("id")) in valid_ids
-    ]
-    return store
-
-
-def trajectory_figure(trajectory: np.ndarray, ids: list[str], title: str) -> go.Figure:
-    frame = pd.DataFrame(trajectory, columns=ids)
-    frame.index.name = "t"
-    tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
-    figure = px.line(tidy, x="t", y="Value", color="Node", title=title)
-    figure.update_layout(title_x=0.5)
-    return figure
-
-
-def control_figure(states: np.ndarray, control: np.ndarray, ids: list[str], title: str) -> go.Figure:
-    frames = []
-    for values, kind in ((states, "State x"), (control, "Input u")):
-        columns = ids[: values.shape[1]]
-        frame = pd.DataFrame(values[:, : len(columns)], columns=columns)
-        frame.index.name = "t"
-        tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
-        tidy["Type"] = kind
-        frames.append(tidy)
-    figure = px.line(
-        pd.concat(frames, ignore_index=True),
-        x="t",
-        y="Value",
-        color="Node",
-        facet_row="Type",
-        title=title,
-    )
-    figure.update_layout(title_x=0.5)
-    return figure
-
-
-def energy_figure(minimum_u: np.ndarray, optimal_u: np.ndarray, ids: list[str]) -> go.Figure:
-    minimum = aggregate_control_energy(minimum_u)
-    optimal = aggregate_control_energy(optimal_u)
-    count = min(len(ids), len(minimum), len(optimal))
-    frame = pd.DataFrame(
-        {
-            "Node": ids[:count] * 2,
-            "Energy": np.concatenate((minimum[:count], optimal[:count])),
-            "Method": ["Minimum"] * count + ["Optimal"] * count,
-        }
-    )
-    figure = px.bar(
-        frame,
-        x="Node",
-        y="Energy",
-        color="Method",
-        barmode="group",
-        title="Aggregate control energy by node",
-    )
-    figure.update_layout(title_x=0.5)
-    return figure
-
-
-initial = default_store()
+initial = default_store(DEFAULT_ADJACENCY)
 app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
 server = app.server
 app.title = "Network Control Theory Tutorial"
@@ -241,14 +94,7 @@ app.layout = dbc.Container(
                         ),
                         dbc.Button("Switch x0 / xf", id="switch-states", className="my-2", n_clicks=0),
                         html.H4("Parameters", className="mt-3"),
-                        dbc.Row(
-                            [
-                                dbc.Col(dbc.Input(id="c", type="number", min=0.000001, value=initial["c"], placeholder="c")),
-                                dbc.Col(dbc.Input(id="T", type="number", min=1, step=1, value=initial["T"], placeholder="T")),
-                                dbc.Col(dbc.Input(id="rho", type="number", min=0.000001, value=initial["rho"], placeholder="rho")),
-                            ],
-                            className="g-2",
-                        ),
+                        parameter_controls(initial),
                         html.H4("Edit network", className="mt-3"),
                         dbc.ButtonGroup(
                             [
@@ -287,7 +133,7 @@ app.layout = dbc.Container(
             className="g-3",
         ),
         html.H3("Topology measures", className="mt-4"),
-        dbc.Row(metric_cards(initial["elements"]), id="topology-metrics", className="g-2"),
+        dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
         dbc.Row(
             [
                 dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
@@ -350,6 +196,7 @@ def update_network(
     time_horizon,
     rho,
 ):
+    """Dispatch one user edit and keep graph data and state-table rows in sync."""
     action = ctx.triggered_id
     try:
         if action == "upload-data":
@@ -414,6 +261,8 @@ def update_network(
     prevent_initial_call=True,
 )
 def render_network(store):
+    """Render stored edits and refresh topology cards through model/view helpers."""
+    adjacency, _, _, _ = matrices_from_elements(store["elements"])
     return (
         store["elements"],
         stylesheet_for(store["elements"]),
@@ -421,7 +270,7 @@ def render_network(store):
         store["c"],
         store["T"],
         store["rho"],
-        metric_cards(store["elements"]),
+        metric_cards(topology_metrics(adjacency)),
     )
 
 
@@ -440,34 +289,18 @@ def render_network(store):
     prevent_initial_call=True,
 )
 def update_figures(_clicks, store, state_rows, c, time_horizon, rho):
+    """Translate UI data, request a model solution, and pass results to the view."""
     try:
-        if not isinstance(time_horizon, int) or isinstance(time_horizon, bool) or time_horizon < 1:
-            raise ValueError("T must be a positive integer")
-        if c is None or float(c) <= 0 or rho is None or float(rho) <= 0:
-            raise ValueError("c and rho must be positive")
-
         adjacency, control, constraint, ids = matrices_from_elements(store["elements"])
-        if not ids:
-            raise ValueError("The network has no nodes")
-        rows = {str(row["id"]): row for row in state_rows}
-        if any(node_id not in rows for node_id in ids):
-            raise ValueError("State values are missing for one or more nodes")
-        x0 = np.asarray([rows[node_id]["x0"] for node_id in ids], dtype=float).reshape(-1, 1)
-        xf = np.asarray([rows[node_id]["xf"] for node_id in ids], dtype=float).reshape(-1, 1)
-        normalized = matrix_normalization(adjacency, float(c))
-
-        uncontrolled = state_trajectory(normalized, x0, time_horizon)
-        minimum_x, minimum_u, _minimum_error = minimum_input(
-            normalized, time_horizon, control, x0, xf
-        )
-        optimal_x, optimal_u, _optimal_error = optimal_input(
-            normalized, time_horizon, control, x0, xf, float(rho), constraint
+        x0, xf = states_from_rows(state_rows, ids)
+        result = compute_control_results(
+            adjacency, control, constraint, x0, xf, time_horizon, c=c, rho=rho
         )
         return (
-            trajectory_figure(uncontrolled, ids, "Uncontrolled state trajectory"),
-            control_figure(minimum_x, minimum_u, ids, "Minimum control energy"),
-            control_figure(optimal_x, optimal_u, ids, "Optimal control energy"),
-            energy_figure(minimum_u, optimal_u, ids),
+            trajectory_figure(result.uncontrolled, ids, "Uncontrolled state trajectory"),
+            control_figure(result.minimum.states, result.minimum.inputs, ids, "Minimum control energy"),
+            control_figure(result.optimal.states, result.optimal.inputs, ids, "Optimal control energy"),
+            energy_figure(result.minimum.energy, result.optimal.energy, ids),
             "",
         )
     except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as error:
