@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from dash import Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
+from dash import ClientsideFunction, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
 from network_control.energies import minimum_input, optimal_input
@@ -203,17 +203,27 @@ app.title = "Network Control Theory Tutorial"
 app.layout = dbc.Container(
     [
         dcc.Store(id="network-store", data=initial),
+        dcc.Store(id="viewport-guard"),
         html.H1("Network Control Theory Tutorial", className="my-3"),
         dbc.Row(
             [
                 dbc.Col(
-                    cyto.Cytoscape(
-                        id="cytoscape",
-                        layout={"name": "cose", "animate": False},
-                        elements=initial["elements"],
-                        stylesheet=stylesheet_for(initial["elements"]),
-                        style={"width": "100%", "height": "520px"},
-                    ),
+                    [
+                        cyto.Cytoscape(
+                            id="cytoscape",
+                            layout={"name": "cose", "animate": False, "fit": True, "padding": 32},
+                            elements=initial["elements"],
+                            stylesheet=stylesheet_for(initial["elements"]),
+                            style={"width": "100%", "height": "520px"},
+                            maxZoom=4,
+                            responsive=True,
+                        ),
+                        dbc.Button(
+                            "Fit graph", id="fit-graph", n_clicks=0,
+                            color="secondary", outline=True, className="mt-2",
+                            title="Fit all nodes inside the canvas",
+                        ),
+                    ],
                     lg=7,
                 ),
                 dbc.Col(
@@ -289,6 +299,15 @@ app.layout = dbc.Container(
         ),
     ],
     fluid=True,
+)
+
+
+app.clientside_callback(
+    ClientsideFunction(namespace="nctViewport", function_name="keepVisible"),
+    Output("viewport-guard", "data"),
+    Input("cytoscape", "extent"),
+    Input("cytoscape", "elements"),
+    Input("fit-graph", "n_clicks"),
 )
 
 

@@ -7,6 +7,7 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 ## Features
 
 - Add and remove nodes without renumbering the nodes that remain.
+- Pan and zoom with automatic recovery if the graph leaves the canvas; use **Fit graph** to show all nodes without changing their positions.
 - Connect selected nodes, remove selected edges, and edit edge weights.
 - Select controller and constrained nodes.
 - Edit or swap initial and target states.
@@ -58,4 +59,20 @@ The core network and numerical helpers use the standard-library test runner:
 
 ```bash
 python -m unittest discover -s tests -v
+```
+
+Viewport logic tests use the real Cytoscape.js engine in headless mode (Node.js required):
+
+```bash
+npm install --no-save --package-lock=false cytoscape@3.33.1
+node --test tests/test_viewport.cjs
+```
+
+Browser regression tests cover viewport recovery, zoom limits, resizing, uploads,
+and the **Fit graph** button. Install the app requirements first, then run:
+
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+python -m unittest discover -s tests/browser -v
 ```
