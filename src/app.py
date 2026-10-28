@@ -147,11 +147,6 @@ app.layout = dbc.Container(
         html.H3("Topology measures", className="mt-4"),
         dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
         html.H3("Control Energy Measures", className="mt-4"),
-        html.P(
-            "The two lower plots show minimum-energy control (left) and optimal control "
-            "(right) for the selected time system.",
-            className="text-muted",
-        ),
         dbc.Row(
             [
                 dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
@@ -369,4 +364,4 @@ def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=8050, debug=False)
+    app.run(host="0.0.0.0", port=8050, debug=True)
