@@ -148,15 +148,20 @@ app.layout = dbc.Container(
         dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
         html.H3("Control Energy Measures", className="mt-4"),
         html.P(
-            "Each control-trajectory plot keeps its last computed result for that time system.",
+            "The two lower plots show minimum-energy control (left) and optimal control "
+            "(right) for the selected time system.",
             className="text-muted",
         ),
         dbc.Row(
             [
                 dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
                 dbc.Col(dcc.Graph(id="aggregate-energy", figure=go.Figure()), lg=6),
-                dbc.Col(dcc.Graph(id="discrete-control", figure=empty_control_figure("discrete")), lg=6),
-                dbc.Col(dcc.Graph(id="continuous-control", figure=empty_control_figure("continuous")), lg=6),
+                dbc.Col(dcc.Graph(
+                    id="minimum-energy", figure=empty_control_figure("Minimum control energy trajectories"),
+                ), lg=6),
+                dbc.Col(dcc.Graph(
+                    id="optimal-energy", figure=empty_control_figure("Optimal control energy trajectories"),
+                ), lg=6),
             ],
             className="g-0 mt-3",
         ),
@@ -320,8 +325,8 @@ def render_network(store, current_elements):
 
 @app.callback(
     Output("state-trajectory", "figure"),
-    Output("discrete-control", "figure"),
-    Output("continuous-control", "figure"),
+    Output("minimum-energy", "figure"),
+    Output("optimal-energy", "figure"),
     Output("aggregate-energy", "figure"),
     Output("plot-status", "children"),
     Input("plot", "n_clicks"),
@@ -334,26 +339,28 @@ def render_network(store, current_elements):
     prevent_initial_call=True,
 )
 def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
-    """Compute the selected time system and preserve the other control plot."""
+    """Plot each method in its reserved figure using the selected time system."""
     try:
         adjacency, control, constraint, ids = matrices_from_elements(store["elements"])
         x0, xf = states_from_rows(state_rows, ids)
         result = compute_control_results(
             adjacency, control, constraint, x0, xf, time_horizon, c=c, rho=rho, system=system
         )
-        controlled = control_figure(
-            result.minimum.states, result.minimum.inputs, ids,
-            f"{system.capitalize()}-time control trajectories",
-            state_times=result.state_times, input_times=result.input_times, system=result.system,
-            optimal_states=result.optimal.states, optimal_control=result.optimal.inputs,
-        )
         return (
             trajectory_figure(
                 result.uncontrolled, ids, f"Uncontrolled state trajectory ({system})",
                 times=result.state_times, system=result.system,
             ),
-            controlled if system == "discrete" else no_update,
-            controlled if system == "continuous" else no_update,
+            control_figure(
+                result.minimum.states, result.minimum.inputs, ids,
+                f"Minimum control energy trajectories ({system})",
+                state_times=result.state_times, input_times=result.input_times, system=result.system,
+            ),
+            control_figure(
+                result.optimal.states, result.optimal.inputs, ids,
+                f"Optimal control energy trajectories ({system})",
+                state_times=result.state_times, input_times=result.input_times, system=result.system,
+            ),
             energy_figure(result.minimum.energy, result.optimal.energy, ids, system=system),
             "",
         )

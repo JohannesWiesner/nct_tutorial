@@ -104,33 +104,23 @@ def control_figure(
     states: np.ndarray, control: np.ndarray, ids: list[str], title: str,
     *, state_times: np.ndarray | None = None, input_times: np.ndarray | None = None,
     system: str = "discrete",
-    optimal_states: np.ndarray | None = None, optimal_control: np.ndarray | None = None,
 ) -> go.Figure:
-    """Plot state trajectories and inputs, optionally comparing control methods.
+    """Plot one control method's states and inputs in separate panels.
 
     Both arrays have nodes in columns and time in rows. They may have
     different row counts: T control inputs connect T+1 discrete states.
     Explicit time arrays keep continuous sample indices out of the axes.
-    Supply both optimal arrays to compare minimum (solid) and optimal
-    (dashed) control for the same time system; node colors stay consistent.
+    The caller supplies either the minimum-energy or optimal-control
+    solution; each figure contains only that method's trajectories.
     """
-    if (optimal_states is None) != (optimal_control is None):
-        raise ValueError("Provide both optimal states and optimal control inputs")
-    methods = [("Minimum", states, control)]
-    if optimal_states is not None:
-        methods.append(("Optimal", optimal_states, optimal_control))
     frames = []
-    for method, method_states, method_control in methods:
-        for values, kind, times in (
-            (method_states, "State x", state_times), (method_control, "Input u", input_times)
-        ):
-            columns = ids[: values.shape[1]]
-            frame = pd.DataFrame(values[:, : len(columns)], columns=columns, index=times)
-            frame.index.name = "t"
-            tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
-            tidy["Type"] = kind
-            tidy["Method"] = method
-            frames.append(tidy)
+    for values, kind, times in ((states, "State x", state_times), (control, "Input u", input_times)):
+        columns = ids[: values.shape[1]]
+        frame = pd.DataFrame(values[:, : len(columns)], columns=columns, index=times)
+        frame.index.name = "t"
+        tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
+        tidy["Type"] = kind
+        frames.append(tidy)
     figure = px.line(
         pd.concat(frames, ignore_index=True),
         x="t",
@@ -138,21 +128,18 @@ def control_figure(
         color="Node",
         facet_row="Type",
         title=title,
-        line_dash="Method" if len(methods) > 1 else None,
-        line_dash_map={"Minimum": "solid", "Optimal": "dash"},
     )
     figure.update_layout(title_x=0.5)
     figure.update_xaxes(title_text="Time step" if system == "discrete" else "Time (model units)")
     return figure
 
 
-def empty_control_figure(system: str) -> go.Figure:
-    """Label a time system's control plot before its first computation."""
-    validate_time_system(system)
+def empty_control_figure(title: str) -> go.Figure:
+    """Label a control method's reserved plot before its first computation."""
     figure = go.Figure()
-    figure.update_layout(title=f"{system.capitalize()}-time control trajectories", title_x=0.5)
+    figure.update_layout(title=title, title_x=0.5)
     figure.add_annotation(
-        text=f"Select {system} time and plot to see its control trajectories.",
+        text="Click Plot trajectories and energy to compute this method's trajectories.",
         x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False,
     )
     figure.update_xaxes(visible=False)

@@ -14,7 +14,7 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 - Choose discrete or continuous time, with matching dynamics and energy calculations.
 - Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, `rho`, and `system` configuration.
 - Inspect density, degree, strength, and clustering as the topology changes.
-- Compare minimum/optimal control trajectories in separate discrete and continuous plots; recomputing one system preserves the other plot.
+- Compare minimum-energy trajectories in the lower-left plot and optimal-control trajectories in the lower-right plot for the selected time system.
 - Inspect uncontrolled trajectories and aggregate energy per node for the selected time system under **Control Energy Measures**.
 
 ## Run locally
@@ -85,13 +85,13 @@ both control solutions, time axes, and energy calculations. Discrete time is the
 default. After changing a parameter or system, click **Plot trajectories and
 energy** to recompute the figures.
 
-The two control-trajectory plots are organized by **time system**. Each compares
-minimum control (solid lines) and optimal control (dashed lines), with the same
-color for each node. Only the selected system's plot updates, so the other
-retains its last computed result, even after changing states or the network.
-The uncontrolled trajectory and aggregate-energy chart show the selected
-system and include its name in their titles. Minimum and optimal control are
-available in both time systems.
+The lower-left figure is reserved for **minimum control energy** trajectories;
+the lower-right figure is reserved for **optimal control energy** trajectories.
+Each contains only its own method's states and inputs. Both use the selected
+time system and update when you click **Plot trajectories and energy**. The
+method and time system appear in each title. The uncontrolled trajectory and
+aggregate-energy chart also show the selected system. Minimum and optimal
+control are available in both time systems.
 
 | Convention | Discrete | Continuous |
 | --- | --- | --- |
