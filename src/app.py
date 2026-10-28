@@ -82,83 +82,118 @@ app.layout = dbc.Container(
                             maxZoom=4,
                             responsive=True,
                         ),
-                        dbc.Button(
-                            "Fit graph", id="fit-graph", n_clicks=0,
-                            color="secondary", outline=True,
-                            className="mt-2 align-self-start flex-shrink-0",
-                            title="Fit all nodes inside the canvas",
+                        html.Div(
+                            [
+                                dbc.Button(
+                                    "Fit graph", id="fit-graph", n_clicks=0,
+                                    color="secondary", outline=True,
+                                    title="Fit all nodes inside the canvas",
+                                ),
+                                dbc.Button(
+                                    "Plot trajectories and energy", id="plot",
+                                    color="primary", n_clicks=0,
+                                ),
+                            ],
+                            className="d-flex flex-wrap gap-2 mt-2 flex-shrink-0",
                         ),
+                        html.Div(id="plot-status", className="mt-2 text-danger"),
                     ],
                     lg=7, id="network-panel", className="d-flex flex-column",
                 ),
                 dbc.Col(
                     [
-                        html.H4("States"),
-                        dash_table.DataTable(
-                            id="states-table",
-                            columns=[
-                                {"id": "id", "name": "Node", "editable": False},
-                                {"id": "x0", "name": "x0", "type": "numeric"},
-                                {"id": "xf", "name": "xf", "type": "numeric"},
-                            ],
-                            data=initial["states"],
-                            editable=True,
-                        ),
-                        dbc.Button("Switch x0 / xf", id="switch-states", className="my-2", n_clicks=0),
-                        html.H4("Parameters", className="mt-3"),
-                        parameter_controls(initial),
-                        html.H4("Edit network", className="mt-3"),
-                        dbc.ButtonGroup(
+                        html.Section(
                             [
-                                dbc.Button("Add node", id="add-node", n_clicks=0),
-                                dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
+                                html.H4("States"),
+                                dash_table.DataTable(
+                                    id="states-table",
+                                    columns=[
+                                        {"id": "id", "name": "Node", "editable": False},
+                                        {"id": "x0", "name": "x0", "type": "numeric"},
+                                        {"id": "xf", "name": "xf", "type": "numeric"},
+                                    ],
+                                    data=initial["states"],
+                                    editable=True,
+                                ),
+                                dbc.Button(
+                                    "Switch x0 / xf", id="switch-states",
+                                    className="mt-2", n_clicks=0,
+                                ),
                             ],
-                            className="mb-2",
+                            className="border rounded p-3",
                         ),
-                        html.Div(
+                        html.Section(
                             [
-                                dbc.Button("Connect / disconnect", id="toggle-edge", n_clicks=0),
-                                dbc.Button("Toggle controller", id="toggle-controller", n_clicks=0),
-                                dbc.Button("Toggle constraint", id="toggle-constraint", n_clicks=0),
+                                html.H4("Parameters"),
+                                parameter_controls(initial),
                             ],
-                            className="mb-2 d-flex flex-wrap gap-2",
+                            className="border rounded p-3",
                         ),
-                        dbc.InputGroup(
+                        html.Section(
                             [
-                                dbc.Input(id="edge-weight", type="number", min=0.000001, value=1),
-                                dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
+                                html.H4("Edit network"),
+                                dbc.ButtonGroup(
+                                    [
+                                        dbc.Button("Add node", id="add-node", n_clicks=0),
+                                        dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
+                                    ],
+                                    className="mb-2",
+                                ),
+                                html.Div(
+                                    [
+                                        dbc.Button("Connect / disconnect", id="toggle-edge", n_clicks=0),
+                                        dbc.Button("Toggle controller", id="toggle-controller", n_clicks=0),
+                                        dbc.Button("Toggle constraint", id="toggle-constraint", n_clicks=0),
+                                    ],
+                                    className="mb-2 d-flex flex-wrap gap-2",
+                                ),
+                                dbc.InputGroup(
+                                    [
+                                        dbc.Input(id="edge-weight", type="number", min=0.000001, value=1),
+                                        dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
+                                    ],
+                                    className="mb-3",
+                                ),
+                                dcc.Upload(
+                                    id="upload-data",
+                                    children=dbc.Button("Upload JSON configuration", color="secondary"),
+                                    accept="application/json,.json",
+                                ),
+                                html.Div(id="edit-status", className="mt-2"),
                             ],
-                            className="mb-3",
+                            className="border rounded p-3",
                         ),
-                        dcc.Upload(
-                            id="upload-data",
-                            children=dbc.Button("Upload JSON configuration", color="secondary"),
-                            accept="application/json,.json",
-                        ),
-                        html.Div(id="edit-status", className="mt-2"),
-                        dbc.Button("Plot trajectories and energy", id="plot", color="primary", className="mt-3", n_clicks=0),
-                        html.Div(id="plot-status", className="mt-2 text-danger"),
                     ],
-                    lg=5, id="network-controls",
+                    lg=5, id="network-controls", className="d-flex flex-column gap-3",
                 ),
             ],
             className="g-3 align-items-stretch",
         ),
-        html.H3("Topology measures", className="mt-4"),
-        dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
-        html.H3("Control Energy Measures", className="mt-4"),
-        dbc.Row(
+        html.Section(
             [
-                dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
-                dbc.Col(dcc.Graph(id="aggregate-energy", figure=go.Figure()), lg=6),
-                dbc.Col(dcc.Graph(
-                    id="minimum-energy", figure=empty_control_figure("Minimum control energy trajectories"),
-                ), lg=6),
-                dbc.Col(dcc.Graph(
-                    id="optimal-energy", figure=empty_control_figure("Optimal control energy trajectories"),
-                ), lg=6),
+                html.H3("Topology measures"),
+                dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
             ],
-            className="g-0 mt-3",
+            className="border rounded p-3 mt-4",
+        ),
+        html.Section(
+            [
+                html.H3("Control Energy Measures"),
+                dbc.Row(
+                    [
+                        dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
+                        dbc.Col(dcc.Graph(id="aggregate-energy", figure=go.Figure()), lg=6),
+                        dbc.Col(dcc.Graph(
+                            id="minimum-energy", figure=empty_control_figure("Minimum control energy trajectories"),
+                        ), lg=6),
+                        dbc.Col(dcc.Graph(
+                            id="optimal-energy", figure=empty_control_figure("Optimal control energy trajectories"),
+                        ), lg=6),
+                    ],
+                    className="g-0 mt-3",
+                ),
+            ],
+            className="border rounded p-3 mt-4",
         ),
     ],
     fluid=True,

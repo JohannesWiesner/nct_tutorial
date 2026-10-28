@@ -190,50 +190,56 @@ def horizon_control_settings(system: str) -> tuple[str, float, float, str]:
 
 
 def parameter_controls(parameters: dict) -> html.Div:
-    """Build the time selector and numeric inputs with persistent labels.
+    """Build one aligned row of time-system, T, c, and rho controls.
 
     Labels remain visible when inputs contain values, and their htmlFor
-    attributes associate them with the matching fields. Horizon controls
-    describe steps or durations according to the selected time system.
+    attributes associate them with the matching fields. Shared grid rows
+    keep inputs level when labels wrap, with horizon help beneath T.
     """
     system = parameters.get("system", "discrete")
     horizon_label, minimum, step, help_text = horizon_control_settings(system)
     specs = (
-        ("c", "Normalization (c)", 0.000001, "any"),
         ("T", horizon_label, minimum, step),
+        ("c", "Normalization (c)", 0.000001, "any"),
         ("rho", "Control weight (rho)", 0.000001, "any"),
     )
-    numeric_controls = dbc.Row(
-        [
-            dbc.Col(
-                [
-                    html.Label(
-                        label, htmlFor=name, className="form-label",
-                        **({"id": "T-label"} if name == "T" else {}),
-                    ),
-                    dbc.Input(
-                        id=name, type="number", min=minimum, step=step,
-                        value=parameters[name],
-                    ),
-                ],
-                xs=12, sm=4,
-            )
-            for name, label, minimum, step in specs
-        ],
-        className="g-2",
-    )
-    return html.Div(
-        [
-            html.Label("Time system", htmlFor="time-system", className="form-label"),
+    fields = [
+        (
+            "time-system", "Time system",
             dbc.Select(
                 id="time-system", value=system,
                 options=[
                     {"label": "Discrete", "value": "discrete"},
                     {"label": "Continuous", "value": "continuous"},
                 ],
-                className="mb-2",
             ),
-            numeric_controls,
-            html.Small(help_text, id="time-horizon-help", className="text-muted"),
-        ]
+        ),
+        *[
+            (
+                name, label,
+                dbc.Input(
+                    id=name, type="number", min=minimum, step=step,
+                    value=parameters[name],
+                ),
+            )
+            for name, label, minimum, step in specs
+        ],
+    ]
+    children = []
+    for column, (name, label, control) in enumerate(fields, start=1):
+        children.append(html.Label(
+            label, htmlFor=name, className="form-label mb-0",
+            style={"gridColumn": column, "gridRow": 1, "overflowWrap": "anywhere"},
+            **({"id": "T-label"} if name == "T" else {}),
+        ))
+        control.style = {"gridColumn": column, "gridRow": 2, "minWidth": 0}
+        children.append(control)
+    children.append(html.Small(
+        help_text, id="time-horizon-help", className="text-muted",
+        style={"gridColumn": 2, "gridRow": 3},
+    ))
+    return html.Div(
+        children,
+        className="d-grid gap-2",
+        style={"gridTemplateColumns": "repeat(4, minmax(0, 1fr))", "alignItems": "start"},
     )
