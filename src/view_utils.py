@@ -105,11 +105,13 @@ def control_figure(
     *, state_times: np.ndarray | None = None, input_times: np.ndarray | None = None,
     system: str = "discrete",
 ) -> go.Figure:
-    """Plot state trajectories and control inputs in separate panels.
+    """Plot one control method's states and inputs in separate panels.
 
     Both arrays have nodes in columns and time in rows. They may have
     different row counts: T control inputs connect T+1 discrete states.
     Explicit time arrays keep continuous sample indices out of the axes.
+    The caller supplies either the minimum-energy or optimal-control
+    solution; each figure contains only that method's trajectories.
     """
     frames = []
     for values, kind, times in ((states, "State x", state_times), (control, "Input u", input_times)):
@@ -132,7 +134,23 @@ def control_figure(
     return figure
 
 
-def energy_figure(minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: list[str]) -> go.Figure:
+def empty_control_figure(title: str) -> go.Figure:
+    """Label a control method's reserved plot before its first computation."""
+    figure = go.Figure()
+    figure.update_layout(title=title, title_x=0.5)
+    figure.add_annotation(
+        text="Click Plot trajectories and energy to compute this method's trajectories.",
+        x=0.5, y=0.5, xref="paper", yref="paper", showarrow=False,
+    )
+    figure.update_xaxes(visible=False)
+    figure.update_yaxes(visible=False)
+    return figure
+
+
+def energy_figure(
+    minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: list[str],
+    *, system: str | None = None,
+) -> go.Figure:
     """Compare already-computed minimum and optimal energy per node.
 
     Each energy vector follows ids. Numerical integration or summation is
@@ -154,7 +172,7 @@ def energy_figure(minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: l
         y="Energy",
         color="Method",
         barmode="group",
-        title="Aggregate control energy by node",
+        title="Aggregate control energy by node" + (f" ({system})" if system else ""),
     )
     figure.update_layout(title_x=0.5)
     return figure

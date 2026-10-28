@@ -61,6 +61,22 @@ def node_ids(elements: Mapping[str, list] | list) -> list[str]:
     )
 
 
+def same_graph_data(first: Mapping[str, list] | list, second: Mapping[str, list] | list) -> bool:
+    """Compare node/edge data while ignoring positions, selection, and ordering.
+
+    Cytoscape owns the current visual layout. State-table or parameter
+    edits should not resend stored coordinates and restart that layout.
+    IDs, weights, and controller/constraint flags still count as changes.
+    """
+    def data_by_id(elements):
+        return {
+            group: {str(element["data"]["id"]): element["data"] for element in entries}
+            for group, entries in split_elements(elements).items()
+        }
+
+    return data_by_id(first) == data_by_id(second)
+
+
 def from_adjacency_matrix(
     adjacency: np.ndarray,
     controller: Iterable[bool] | None = None,

@@ -10,6 +10,7 @@ from dash import no_update
 
 from src.app import app, initial, render_network, update_figures
 from src.graph_utils import validate_configuration
+from src.nct_utils import compute_control_results
 from src.view_utils import control_figure, energy_figure
 
 
@@ -82,7 +83,7 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(inputs[name]["value"], initial[name])
                 self.assertNotIn("placeholder", inputs[name])
 
-    def test_all_four_figures_render_for_default_network(self):
+    def test_default_plot_updates_both_control_methods(self):
         result = update_figures(1, initial, initial["states"], 1, 3, 1, "discrete")
         self.assertEqual(result[-1], "")
         self.assertTrue(all(figure.data for figure in result[:4]))
@@ -91,7 +92,7 @@ class AppTests(unittest.TestCase):
     def test_uploaded_configuration_flows_through_model_and_view(self):
         store = validate_configuration({"A": [[0, 2], [2, 0]], "x0": [1, 0],
                                         "xf": [0, 1], "c": 3, "T": 4, "rho": 2})
-        rendered = render_network(store)
+        rendered = render_network(store, initial["elements"])
         self.assertEqual(rendered[3:6], (3, 4, 2))
         result = update_figures(1, store, store["states"], store["c"], store["T"], store["rho"], store["system"])
         self.assertEqual(result[-1], "")
@@ -123,7 +124,9 @@ class AppTests(unittest.TestCase):
             "network-store.data", {"upload-data.contents": upload}, "upload-data.contents"
         )["network-store"]["data"]
         rendered = self.callback_response(
-            "cytoscape.elements", {"network-store.data": loaded}, "network-store.data"
+            "cytoscape.elements",
+            {"network-store.data": loaded, "cytoscape.elements": initial["elements"]},
+            "network-store.data",
         )
         self.assertEqual(rendered["time-system"]["value"], "continuous")
         self.assertEqual(rendered["T"]["value"], 1.25)
@@ -138,7 +141,7 @@ class AppTests(unittest.TestCase):
         )["network-store"]["data"]
         self.assertEqual((edited["system"], edited["T"]), ("discrete", 3))
         self.assertEqual(len(edited["elements"]["nodes"]), 3)
-        self.assertEqual(render_network(edited)[-1], "discrete")
+        self.assertEqual(render_network(edited, loaded["elements"])[-1], "discrete")
 
     def test_continuous_plots_use_model_times_for_all_trajectories(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "continuous")
@@ -162,6 +165,98 @@ class AppTests(unittest.TestCase):
         for name in ("state-trajectory", "minimum-energy", "optimal-energy"):
             self.assertEqual(response[name]["figure"]["layout"]["xaxis"]["title"]["text"],
                              "Time (model units)")
+
+    def test_switching_systems_updates_both_method_figures_without_mixing(self):
+        for system, horizon in (("discrete", 3), ("continuous", 0.1), ("discrete", 4)):
+            response = self.callback_response(
+                "state-trajectory.figure",
+                {"plot.n_clicks": 1, "network-store.data": initial,
+                 "states-table.data": initial["states"], "c.value": 1,
+                 "T.value": horizon, "rho.value": 1, "time-system.value": system},
+                "plot.n_clicks",
+            )
+            for name, method in (("minimum-energy", "Minimum"), ("optimal-energy", "Optimal")):
+                with self.subTest(system=system, method=method):
+                    figure = response[name]["figure"]
+                    self.assertEqual(figure["layout"]["title"]["text"],
+                                     f"{method} control energy trajectories ({system})")
+                    self.assertEqual(len(figure["data"]), 2 * len(initial["states"]))
+                    self.assertEqual({trace["name"] for trace in figure["data"]},
+                                     {row["id"] for row in initial["states"]})
+
+    def test_minimum_figure_is_left_and_optimal_figure_is_right(self):
+        nodes = list(components(app.server.test_client().get("/_dash-layout").get_json()))
+        graphs = [node["props"] for node in nodes if node["type"] == "Graph"]
+        self.assertEqual([graph["id"] for graph in graphs],
+                         ["state-trajectory", "aggregate-energy", "minimum-energy", "optimal-energy"])
+        self.assertEqual(graphs[2]["figure"]["layout"]["title"]["text"],
+                         "Minimum control energy trajectories")
+        self.assertEqual(graphs[3]["figure"]["layout"]["title"]["text"],
+                         "Optimal control energy trajectories")
+
+    def test_each_control_figure_contains_only_its_own_solution(self):
+        for system, horizon in (("discrete", 3), ("continuous", 0.5)):
+            store = validate_configuration({
+                "A": [[0, 1], [1, 0]], "x0": [1, 0], "xf": [0, 1],
+                "system": system, "T": horizon, "rho": 0.1,
+            })
+            model = compute_control_results(
+                np.array([[0, 1], [1, 0]]), np.eye(2), np.eye(2), [1, 0], [0, 1],
+                horizon, rho=0.1, system=system,
+            )
+            self.assertFalse(np.allclose(model.minimum.inputs, model.optimal.inputs))
+            figures = update_figures(1, store, store["states"], 1, horizon, 0.1, system)
+            for figure, solution in ((figures[1], model.minimum), (figures[2], model.optimal)):
+                with self.subTest(system=system, title=figure.layout.title.text):
+                    self.assertEqual(len(figure.data), 4)
+                    for trace in figure.data:
+                        node = int(trace.name)
+                        is_state = "Type=State x" in trace.hovertemplate
+                        values = solution.states if is_state else solution.inputs
+                        times = model.state_times if is_state else model.input_times
+                        np.testing.assert_allclose(trace.y, values[:, node])
+                        np.testing.assert_allclose(trace.x, times)
+
+    def test_swapping_edited_states_does_not_send_graph_or_style_updates(self):
+        rows = copy.deepcopy(initial["states"])
+        rows[0].update(x0=2.5, xf=-1.0)
+        current_elements = copy.deepcopy(initial["elements"])
+        current_elements["nodes"][0]["position"] = {"x": 100, "y": 200}
+        current_elements["nodes"][0]["selected"] = True
+        switched = self.callback_response(
+            "network-store.data",
+            {"switch-states.n_clicks": 1, "network-store.data": initial,
+             "states-table.data": rows, "c.value": 2, "T.value": 3,
+             "rho.value": 4, "time-system.value": "discrete"},
+            "switch-states.n_clicks",
+        )["network-store"]["data"]
+        self.assertEqual(switched["states"][0], {"id": "0", "x0": -1.0, "xf": 2.5})
+        rendered = self.callback_response(
+            "cytoscape.elements",
+            {"network-store.data": switched, "cytoscape.elements": current_elements},
+            "network-store.data",
+        )
+        self.assertNotIn("cytoscape", rendered)
+        self.assertNotIn("topology-metrics", rendered)
+        self.assertEqual(rendered["states-table"]["data"], switched["states"])
+        self.assertEqual(rendered["c"]["value"], 2)
+
+    def test_graph_data_changes_still_refresh_elements_styles_and_metrics(self):
+        for change in ("weight", "controller", "constrain"):
+            modified = copy.deepcopy(initial)
+            if change == "weight":
+                modified["elements"]["edges"][0]["data"]["weight"] = 4.5
+            else:
+                modified["elements"]["nodes"][0]["data"][change] = False
+            with self.subTest(change=change):
+                rendered = self.callback_response(
+                    "cytoscape.elements",
+                    {"network-store.data": modified, "cytoscape.elements": initial["elements"]},
+                    "network-store.data",
+                )
+                self.assertEqual(rendered["cytoscape"]["elements"], modified["elements"])
+                self.assertIn("stylesheet", rendered["cytoscape"])
+                self.assertIn("topology-metrics", rendered)
 
     def test_fractional_duration_is_rejected_after_switch_to_discrete(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "discrete")

@@ -18,6 +18,7 @@ from .graph_utils import (
     matrices_from_elements,
     merge_state_edits,
     node_ids,
+    same_graph_data,
     states_from_rows,
     toggle_edges,
     toggle_node_flag,
@@ -26,6 +27,7 @@ from .graph_utils import (
 from .nct_utils import compute_control_results, topology_metrics
 from .view_utils import (
     control_figure,
+    empty_control_figure,
     energy_figure,
     horizon_control_settings,
     metric_cards,
@@ -74,6 +76,7 @@ app.layout = dbc.Container(
                             stylesheet=stylesheet_for(initial["elements"]),
                             style={
                                 "width": "100%", "height": "520px",
+                                "minHeight": "520px", "flex": "1 1 auto",
                                 "border": "1px solid #ced4da", "boxSizing": "border-box",
                             },
                             maxZoom=4,
@@ -81,11 +84,12 @@ app.layout = dbc.Container(
                         ),
                         dbc.Button(
                             "Fit graph", id="fit-graph", n_clicks=0,
-                            color="secondary", outline=True, className="mt-2",
+                            color="secondary", outline=True,
+                            className="mt-2 align-self-start flex-shrink-0",
                             title="Fit all nodes inside the canvas",
                         ),
                     ],
-                    lg=7,
+                    lg=7, id="network-panel", className="d-flex flex-column",
                 ),
                 dbc.Col(
                     [
@@ -111,13 +115,13 @@ app.layout = dbc.Container(
                             ],
                             className="mb-2",
                         ),
-                        dbc.ButtonGroup(
+                        html.Div(
                             [
                                 dbc.Button("Connect / disconnect", id="toggle-edge", n_clicks=0),
                                 dbc.Button("Toggle controller", id="toggle-controller", n_clicks=0),
                                 dbc.Button("Toggle constraint", id="toggle-constraint", n_clicks=0),
                             ],
-                            className="mb-2 d-flex",
+                            className="mb-2 d-flex flex-wrap gap-2",
                         ),
                         dbc.InputGroup(
                             [
@@ -135,19 +139,29 @@ app.layout = dbc.Container(
                         dbc.Button("Plot trajectories and energy", id="plot", color="primary", className="mt-3", n_clicks=0),
                         html.Div(id="plot-status", className="mt-2 text-danger"),
                     ],
-                    lg=5,
+                    lg=5, id="network-controls",
                 ),
             ],
-            className="g-3",
+            className="g-3 align-items-stretch",
         ),
         html.H3("Topology measures", className="mt-4"),
         dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
+        html.H3("Control Energy Measures", className="mt-4"),
+        html.P(
+            "The two lower plots show minimum-energy control (left) and optimal control "
+            "(right) for the selected time system.",
+            className="text-muted",
+        ),
         dbc.Row(
             [
                 dbc.Col(dcc.Graph(id="state-trajectory", figure=go.Figure()), lg=6),
                 dbc.Col(dcc.Graph(id="aggregate-energy", figure=go.Figure()), lg=6),
-                dbc.Col(dcc.Graph(id="minimum-energy", figure=go.Figure()), lg=6),
-                dbc.Col(dcc.Graph(id="optimal-energy", figure=go.Figure()), lg=6),
+                dbc.Col(dcc.Graph(
+                    id="minimum-energy", figure=empty_control_figure("Minimum control energy trajectories"),
+                ), lg=6),
+                dbc.Col(dcc.Graph(
+                    id="optimal-energy", figure=empty_control_figure("Optimal control energy trajectories"),
+                ), lg=6),
             ],
             className="g-0 mt-3",
         ),
@@ -282,19 +296,29 @@ def update_network(
     Output("topology-metrics", "children"),
     Output("time-system", "value"),
     Input("network-store", "data"),
+    State("cytoscape", "elements"),
     prevent_initial_call=True,
 )
-def render_network(store):
-    """Render stored edits and refresh topology cards through model/view helpers."""
-    adjacency, _, _, _ = matrices_from_elements(store["elements"])
+def render_network(store, current_elements):
+    """Update graph props only when node/edge data changed.
+
+    State swaps and parameter edits preserve Cytoscape's current positions,
+    selection, and viewport by leaving its elements and stylesheet untouched.
+    """
+    elements = stylesheet = metrics = no_update
+    if not same_graph_data(store["elements"], current_elements):
+        elements = store["elements"]
+        stylesheet = stylesheet_for(elements)
+        adjacency, _, _, _ = matrices_from_elements(elements)
+        metrics = metric_cards(topology_metrics(adjacency))
     return (
-        store["elements"],
-        stylesheet_for(store["elements"]),
+        elements,
+        stylesheet,
         store["states"],
         store["c"],
         store["T"],
         store["rho"],
-        metric_cards(topology_metrics(adjacency)),
+        metrics,
         store.get("system", "discrete"),
     )
 
@@ -315,7 +339,7 @@ def render_network(store):
     prevent_initial_call=True,
 )
 def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
-    """Translate UI data, request a model solution, and pass results to the view."""
+    """Plot each method in its reserved figure using the selected time system."""
     try:
         adjacency, control, constraint, ids = matrices_from_elements(store["elements"])
         x0, xf = states_from_rows(state_rows, ids)
@@ -324,18 +348,20 @@ def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
         )
         return (
             trajectory_figure(
-                result.uncontrolled, ids, "Uncontrolled state trajectory",
+                result.uncontrolled, ids, f"Uncontrolled state trajectory ({system})",
                 times=result.state_times, system=result.system,
             ),
             control_figure(
-                result.minimum.states, result.minimum.inputs, ids, "Minimum control energy",
+                result.minimum.states, result.minimum.inputs, ids,
+                f"Minimum control energy trajectories ({system})",
                 state_times=result.state_times, input_times=result.input_times, system=result.system,
             ),
             control_figure(
-                result.optimal.states, result.optimal.inputs, ids, "Optimal control energy",
+                result.optimal.states, result.optimal.inputs, ids,
+                f"Optimal control energy trajectories ({system})",
                 state_times=result.state_times, input_times=result.input_times, system=result.system,
             ),
-            energy_figure(result.minimum.energy, result.optimal.energy, ids),
+            energy_figure(result.minimum.energy, result.optimal.energy, ids, system=system),
             "",
         )
     except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as error:

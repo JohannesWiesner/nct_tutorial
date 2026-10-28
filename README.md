@@ -10,11 +10,12 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 - Pan and zoom with automatic recovery if the graph leaves the canvas; use **Fit graph** to show all nodes without changing their positions.
 - Connect selected nodes, remove selected edges, and edit edge weights.
 - Select controller and constrained nodes.
-- Edit or swap initial and target states.
+- Edit or swap initial and target states while preserving the graph layout.
 - Choose discrete or continuous time, with matching dynamics and energy calculations.
 - Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, `rho`, and `system` configuration.
 - Inspect density, degree, strength, and clustering as the topology changes.
-- Plot uncontrolled trajectories, minimum/optimal control inputs, and aggregate energy per node.
+- Compare minimum-energy trajectories in the lower-left plot and optimal-control trajectories in the lower-right plot for the selected time system.
+- Inspect uncontrolled trajectories and aggregate energy per node for the selected time system under **Control Energy Measures**.
 
 ## Run locally
 
@@ -84,6 +85,14 @@ both control solutions, time axes, and energy calculations. Discrete time is the
 default. After changing a parameter or system, click **Plot trajectories and
 energy** to recompute the figures.
 
+The lower-left figure is reserved for **minimum control energy** trajectories;
+the lower-right figure is reserved for **optimal control energy** trajectories.
+Each contains only its own method's states and inputs. Both use the selected
+time system and update when you click **Plot trajectories and energy**. The
+method and time system appear in each title. The uncontrolled trajectory and
+aggregate-energy chart also show the selected system. Minimum and optimal
+control are available in both time systems.
+
 | Convention | Discrete | Continuous |
 | --- | --- | --- |
 | Dynamics | `x(t+1) = A_normalized x(t) + B u(t)` | `dx/dt = A_normalized x(t) + B u(t)` |
@@ -127,7 +136,8 @@ node --test tests/test_viewport.cjs
 ```
 
 Browser regression tests cover viewport recovery, zoom limits, resizing, uploads,
-and the **Fit graph** button. Install the app requirements first, then run:
+the **Fit graph** button, and preservation of node positions when swapping states.
+Install the app requirements first, then run:
 
 ```bash
 python -m pip install playwright
