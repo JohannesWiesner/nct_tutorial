@@ -7,7 +7,7 @@ import unittest
 from playwright.sync_api import sync_playwright
 from werkzeug.serving import WSGIRequestHandler, make_server
 
-from app import app
+from src.app import app
 
 
 class QuietRequestHandler(WSGIRequestHandler):

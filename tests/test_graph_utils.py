@@ -4,7 +4,7 @@ import unittest
 
 import numpy as np
 
-from graph_utils import (
+from src.graph_utils import (
     add_node, decode_upload, delete_nodes, from_adjacency_matrix,
     matrices_from_elements, split_elements, states_from_rows, toggle_edges,
     validate_configuration,
@@ -68,6 +68,17 @@ class ConfigurationTests(unittest.TestCase):
         np.testing.assert_array_equal(control, np.diag([1, 0]))
         np.testing.assert_array_equal(constraint, np.diag([0, 1]))
         self.assertEqual(result["states"][1]["xf"], 1)
+        self.assertEqual(result["system"], "discrete")
+
+    def test_continuous_upload_preserves_fractional_duration(self):
+        result = validate_configuration({"A": [[0, 1], [1, 0]], "system": "continuous", "T": 1.25})
+        self.assertEqual((result["system"], result["T"]), ("continuous", 1.25))
+
+    def test_upload_rejects_invalid_time_system_or_duration(self):
+        for system, duration in (("other", 3), ("discrete", 1.5), ("continuous", 0),
+                                 ("continuous", 0.1001), ("continuous", float("nan"))):
+            with self.subTest(system=system, T=duration), self.assertRaises(ValueError):
+                validate_configuration({"A": [[0]], "system": system, "T": duration})
 
     def test_rejects_non_symmetric_adjacency(self):
         with self.assertRaisesRegex(ValueError, "symmetric"):

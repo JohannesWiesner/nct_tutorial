@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import plotly.graph_objects as go
 from dash import ClientsideFunction, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
 
-from graph_utils import (
+from .graph_utils import (
     add_node,
     decode_upload,
     default_store,
@@ -21,10 +23,11 @@ from graph_utils import (
     toggle_node_flag,
     update_edge_weight,
 )
-from nct_utils import compute_control_results, topology_metrics
-from view_utils import (
+from .nct_utils import compute_control_results, topology_metrics
+from .view_utils import (
     control_figure,
     energy_figure,
+    horizon_control_settings,
     metric_cards,
     parameter_controls,
     stylesheet_for,
@@ -49,7 +52,10 @@ DEFAULT_ADJACENCY = np.array(
 
 
 initial = default_store(DEFAULT_ADJACENCY)
-app = Dash(__name__, external_stylesheets=[dbc.themes.BOOTSTRAP])
+app = Dash(
+    __name__, external_stylesheets=[dbc.themes.BOOTSTRAP],
+    assets_folder=str(Path(__file__).resolve().parent.parent / "assets"),
+)
 server = app.server
 app.title = "Network Control Theory Tutorial"
 
@@ -57,7 +63,6 @@ app.layout = dbc.Container(
     [
         dcc.Store(id="network-store", data=initial),
         dcc.Store(id="viewport-guard"),
-        html.H1("Network Control Theory Tutorial", className="my-3"),
         dbc.Row(
             [
                 dbc.Col(
@@ -67,7 +72,10 @@ app.layout = dbc.Container(
                             layout={"name": "cose", "animate": False, "fit": True, "padding": 32},
                             elements=initial["elements"],
                             stylesheet=stylesheet_for(initial["elements"]),
-                            style={"width": "100%", "height": "520px"},
+                            style={
+                                "width": "100%", "height": "520px",
+                                "border": "1px solid #ced4da", "boxSizing": "border-box",
+                            },
                             maxZoom=4,
                             responsive=True,
                         ),
@@ -145,6 +153,7 @@ app.layout = dbc.Container(
         ),
     ],
     fluid=True,
+    className="py-3",
 )
 
 
@@ -155,6 +164,18 @@ app.clientside_callback(
     Input("cytoscape", "elements"),
     Input("fit-graph", "n_clicks"),
 )
+
+
+@app.callback(
+    Output("T-label", "children"),
+    Output("T", "min"),
+    Output("T", "step"),
+    Output("time-horizon-help", "children"),
+    Input("time-system", "value"),
+)
+def update_time_controls(system):
+    """Keep the horizon label and input bounds aligned with the time system."""
+    return horizon_control_settings(system)
 
 
 @app.callback(
@@ -176,6 +197,7 @@ app.clientside_callback(
     State("c", "value"),
     State("T", "value"),
     State("rho", "value"),
+    State("time-system", "value"),
     prevent_initial_call=True,
 )
 def update_network(
@@ -195,6 +217,7 @@ def update_network(
     c,
     time_horizon,
     rho,
+    system,
 ):
     """Dispatch one user edit and keep graph data and state-table rows in sync."""
     action = ctx.triggered_id
@@ -203,7 +226,7 @@ def update_network(
             return decode_upload(upload_contents), "Configuration loaded."
 
         store = merge_state_edits(dict(store), state_rows)
-        store.update({"c": c, "T": time_horizon, "rho": rho})
+        store.update({"c": c, "T": time_horizon, "rho": rho, "system": system})
         selected_nodes = selected_nodes or []
         selected_edges = selected_edges or []
         selected = [str(node["id"]) for node in selected_nodes]
@@ -257,6 +280,7 @@ def update_network(
     Output("T", "value"),
     Output("rho", "value"),
     Output("topology-metrics", "children"),
+    Output("time-system", "value"),
     Input("network-store", "data"),
     prevent_initial_call=True,
 )
@@ -271,6 +295,7 @@ def render_network(store):
         store["T"],
         store["rho"],
         metric_cards(topology_metrics(adjacency)),
+        store.get("system", "discrete"),
     )
 
 
@@ -286,20 +311,30 @@ def render_network(store):
     State("c", "value"),
     State("T", "value"),
     State("rho", "value"),
+    State("time-system", "value"),
     prevent_initial_call=True,
 )
-def update_figures(_clicks, store, state_rows, c, time_horizon, rho):
+def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
     """Translate UI data, request a model solution, and pass results to the view."""
     try:
         adjacency, control, constraint, ids = matrices_from_elements(store["elements"])
         x0, xf = states_from_rows(state_rows, ids)
         result = compute_control_results(
-            adjacency, control, constraint, x0, xf, time_horizon, c=c, rho=rho
+            adjacency, control, constraint, x0, xf, time_horizon, c=c, rho=rho, system=system
         )
         return (
-            trajectory_figure(result.uncontrolled, ids, "Uncontrolled state trajectory"),
-            control_figure(result.minimum.states, result.minimum.inputs, ids, "Minimum control energy"),
-            control_figure(result.optimal.states, result.optimal.inputs, ids, "Optimal control energy"),
+            trajectory_figure(
+                result.uncontrolled, ids, "Uncontrolled state trajectory",
+                times=result.state_times, system=result.system,
+            ),
+            control_figure(
+                result.minimum.states, result.minimum.inputs, ids, "Minimum control energy",
+                state_times=result.state_times, input_times=result.input_times, system=result.system,
+            ),
+            control_figure(
+                result.optimal.states, result.optimal.inputs, ids, "Optimal control energy",
+                state_times=result.state_times, input_times=result.input_times, system=result.system,
+            ),
             energy_figure(result.minimum.energy, result.optimal.energy, ids),
             "",
         )

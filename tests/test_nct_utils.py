@@ -3,8 +3,9 @@ import sys
 import unittest
 
 import numpy as np
+from scipy.linalg import expm
 
-from nct_utils import (
+from src.nct_utils import (
     aggregate_control_energy, compute_control_results, state_trajectory, topology_metrics,
 )
 
@@ -48,6 +49,12 @@ class NumericalTests(unittest.TestCase):
     def test_aggregate_energy_sums_squared_input_over_time(self):
         np.testing.assert_array_equal(aggregate_control_energy([[1, 2], [3, 4]]), [10, 20])
 
+    def test_continuous_energy_integrates_over_duration_not_sample_count(self):
+        inputs = np.tile([2.0, 3.0], (501, 1))
+        np.testing.assert_allclose(
+            aggregate_control_energy(inputs, system="continuous"), [2.0, 4.5]
+        )
+
 
 class ControlTests(unittest.TestCase):
     def setUp(self):
@@ -66,6 +73,8 @@ class ControlTests(unittest.TestCase):
     def test_control_solutions_obey_discrete_dynamics_and_endpoints(self):
         result = self.solve()
         self.assertEqual(result.uncontrolled.shape, (4, 2))
+        np.testing.assert_array_equal(result.state_times, [0, 1, 2, 3])
+        np.testing.assert_array_equal(result.input_times, [0, 1, 2])
         for solution in (result.minimum, result.optimal):
             np.testing.assert_allclose(solution.states[0], self.x0, atol=1e-10)
             np.testing.assert_allclose(solution.states[-1], self.xf, atol=1e-10)
@@ -128,9 +137,75 @@ class ControlTests(unittest.TestCase):
             with self.subTest(key=key, value=value), self.assertRaisesRegex(ValueError, message):
                 self.solve(**{key: value})
 
+    def test_continuous_normalization_and_uncontrolled_trajectory(self):
+        result = self.solve(system="continuous", time_horizon=0.25, c=3)
+        expected_matrix = self.A / 4 - np.eye(2)
+        np.testing.assert_allclose(result.normalized_adjacency, expected_matrix)
+        self.assertEqual(result.system, "continuous")
+        self.assertEqual(result.uncontrolled.shape, (251, 2))
+        self.assertAlmostEqual(result.state_times[-1], 0.25)
+        np.testing.assert_array_equal(result.state_times, result.input_times)
+        for index in (0, 100, 250):
+            expected = expm(expected_matrix * result.state_times[index]) @ self.x0
+            np.testing.assert_allclose(result.uncontrolled[index], expected, atol=1e-12)
+
+    def test_continuous_control_obeys_differential_dynamics_and_endpoints(self):
+        result = self.solve(system="continuous", time_horizon=0.25)
+        for solution in (result.minimum, result.optimal):
+            np.testing.assert_allclose(solution.states[0], self.x0, atol=1e-10)
+            np.testing.assert_allclose(solution.states[-1], self.xf, atol=1e-10)
+            self.assertEqual(solution.inputs.shape, (251, 2))
+            derivative = np.gradient(solution.states, result.state_times, axis=0, edge_order=2)
+            expected = solution.states @ result.normalized_adjacency.T + solution.inputs @ self.B.T
+            np.testing.assert_allclose(derivative, expected, rtol=2e-6, atol=1e-6)
+            self.assertTrue(all(error < 1e-8 for error in solution.errors))
+
+    def test_continuous_minimum_input_and_energy_match_analytic_solution(self):
+        duration = 0.5
+        target = np.array([2.0, -3.0])
+        result = self.solve(
+            adjacency=np.zeros((2, 2)), initial_state=np.zeros(2),
+            target_state=target, time_horizon=duration, system="continuous",
+        )
+        # Normalization gives A=-I. Its finite-horizon Gramian is w*I.
+        gramian = (1 - np.exp(-2 * duration)) / 2
+        expected_inputs = np.exp(-(duration - result.input_times[:, None])) * target / gramian
+        np.testing.assert_allclose(result.minimum.inputs, expected_inputs, atol=1e-10)
+        np.testing.assert_allclose(result.minimum.energy, target ** 2 / gramian, rtol=1e-10)
+
+    def test_continuous_T_one_uses_continuous_solver_and_honors_rho(self):
+        low = self.solve(system="continuous", time_horizon=1, rho=0.1)
+        high = self.solve(system="continuous", time_horizon=1, rho=10)
+        self.assertEqual(low.minimum.inputs.shape, (1001, 2))
+        np.testing.assert_allclose(low.minimum.inputs, high.minimum.inputs)
+        self.assertFalse(np.allclose(low.optimal.inputs, high.optimal.inputs))
+
+    def test_continuous_zero_constraints_reduce_optimal_to_minimum(self):
+        result = self.solve(system="continuous", constraint=np.zeros((2, 2)), rho=3, time_horizon=0.1)
+        np.testing.assert_allclose(result.minimum.inputs, result.optimal.inputs, atol=1e-10)
+
+    def test_continuous_partial_controllers_reach_target(self):
+        result = self.solve(system="continuous", control=np.diag([1.0, 0.0]), time_horizon=1)
+        for solution in (result.minimum, result.optimal):
+            np.testing.assert_allclose(solution.states[-1], self.xf, atol=1e-8)
+            np.testing.assert_allclose(solution.inputs[:, 1], 0, atol=1e-8)
+
+    def test_invalid_time_system_and_continuous_horizons_are_rejected(self):
+        for system in (None, "invalid", "Continuous"):
+            with self.subTest(system=system), self.assertRaisesRegex(ValueError, "Time system"):
+                self.solve(system=system)
+        for horizon in (0, -1, np.inf, np.nan, True, None, 0.0001, 0.1001):
+            with self.subTest(T=horizon), self.assertRaisesRegex(ValueError, "duration"):
+                self.solve(system="continuous", time_horizon=horizon)
+
+    def test_shortest_continuous_duration_retains_both_endpoints(self):
+        result = self.solve(system="continuous", time_horizon=0.001)
+        np.testing.assert_allclose(result.state_times, [0, 0.001])
+        np.testing.assert_allclose(result.minimum.states[-1], self.xf, atol=1e-10)
+
     def test_model_import_does_not_load_ui_libraries(self):
         result = subprocess.run(
-            [sys.executable, "-c", "import sys, nct_utils; "
+            [sys.executable, "-c", "import sys, src.nct_utils; "
              "assert not any(name in sys.modules for name in ('dash', 'plotly', 'dash_cytoscape'))"],
             capture_output=True, text=True,
         )

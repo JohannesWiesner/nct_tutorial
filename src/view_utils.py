@@ -13,7 +13,8 @@ import plotly.graph_objects as go
 from dash import html
 import dash_bootstrap_components as dbc
 
-from graph_utils import split_elements
+from .graph_utils import split_elements
+from .time_utils import CONTINUOUS_TIME_STEP, validate_time_system
 
 
 def stylesheet_for(elements: dict) -> list[dict]:
@@ -81,29 +82,39 @@ def metric_cards(metrics: dict) -> list:
     ]
 
 
-def trajectory_figure(trajectory: np.ndarray, ids: list[str], title: str) -> go.Figure:
+def trajectory_figure(
+    trajectory: np.ndarray, ids: list[str], title: str,
+    *, times: np.ndarray | None = None, system: str = "discrete",
+) -> go.Figure:
     """Plot a time-by-node state array with one line per node.
 
-    ids labels the array columns; row numbers are discrete time points.
+    ids labels the array columns. times supplies model times, including
+    fractional continuous times; omitted times default to row indices.
     """
-    frame = pd.DataFrame(trajectory, columns=ids)
+    frame = pd.DataFrame(trajectory, columns=ids, index=times)
     frame.index.name = "t"
     tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
     figure = px.line(tidy, x="t", y="Value", color="Node", title=title)
     figure.update_layout(title_x=0.5)
+    figure.update_xaxes(title_text="Time step" if system == "discrete" else "Time (model units)")
     return figure
 
 
-def control_figure(states: np.ndarray, control: np.ndarray, ids: list[str], title: str) -> go.Figure:
+def control_figure(
+    states: np.ndarray, control: np.ndarray, ids: list[str], title: str,
+    *, state_times: np.ndarray | None = None, input_times: np.ndarray | None = None,
+    system: str = "discrete",
+) -> go.Figure:
     """Plot state trajectories and control inputs in separate panels.
 
     Both arrays have nodes in columns and time in rows. They may have
     different row counts: T control inputs connect T+1 discrete states.
+    Explicit time arrays keep continuous sample indices out of the axes.
     """
     frames = []
-    for values, kind in ((states, "State x"), (control, "Input u")):
+    for values, kind, times in ((states, "State x", state_times), (control, "Input u", input_times)):
         columns = ids[: values.shape[1]]
-        frame = pd.DataFrame(values[:, : len(columns)], columns=columns)
+        frame = pd.DataFrame(values[:, : len(columns)], columns=columns, index=times)
         frame.index.name = "t"
         tidy = frame.reset_index().melt(id_vars="t", var_name="Node", value_name="Value")
         tidy["Type"] = kind
@@ -117,6 +128,7 @@ def control_figure(states: np.ndarray, control: np.ndarray, ids: list[str], titl
         title=title,
     )
     figure.update_layout(title_x=0.5)
+    figure.update_xaxes(title_text="Time step" if system == "discrete" else "Time (model units)")
     return figure
 
 
@@ -148,22 +160,39 @@ def energy_figure(minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: l
     return figure
 
 
-def parameter_controls(parameters: dict) -> dbc.Row:
-    """Build numeric model controls with persistent, associated labels.
+def horizon_control_settings(system: str) -> tuple[str, float, float, str]:
+    """Return the horizon label, minimum, increment, and help for a system."""
+    validate_time_system(system)
+    if system == "continuous":
+        return (
+            "Time duration (T)", CONTINUOUS_TIME_STEP, CONTINUOUS_TIME_STEP,
+            "Positive duration in model time units, in increments of 0.001.",
+        )
+    return "Time steps (T)", 1, 1, "Positive integer number of transitions."
+
+
+def parameter_controls(parameters: dict) -> html.Div:
+    """Build the time selector and numeric inputs with persistent labels.
 
     Labels remain visible when inputs contain values, and their htmlFor
-    attributes associate them with the matching c, T, and rho fields.
+    attributes associate them with the matching fields. Horizon controls
+    describe steps or durations according to the selected time system.
     """
+    system = parameters.get("system", "discrete")
+    horizon_label, minimum, step, help_text = horizon_control_settings(system)
     specs = (
         ("c", "Normalization (c)", 0.000001, "any"),
-        ("T", "Time steps (T)", 1, 1),
+        ("T", horizon_label, minimum, step),
         ("rho", "Control weight (rho)", 0.000001, "any"),
     )
-    return dbc.Row(
+    numeric_controls = dbc.Row(
         [
             dbc.Col(
                 [
-                    html.Label(label, htmlFor=name, className="form-label"),
+                    html.Label(
+                        label, htmlFor=name, className="form-label",
+                        **({"id": "T-label"} if name == "T" else {}),
+                    ),
                     dbc.Input(
                         id=name, type="number", min=minimum, step=step,
                         value=parameters[name],
@@ -174,4 +203,19 @@ def parameter_controls(parameters: dict) -> dbc.Row:
             for name, label, minimum, step in specs
         ],
         className="g-2",
+    )
+    return html.Div(
+        [
+            html.Label("Time system", htmlFor="time-system", className="form-label"),
+            dbc.Select(
+                id="time-system", value=system,
+                options=[
+                    {"label": "Discrete", "value": "discrete"},
+                    {"label": "Continuous", "value": "continuous"},
+                ],
+                className="mb-2",
+            ),
+            numeric_controls,
+            html.Small(help_text, id="time-horizon-help", className="text-muted"),
+        ]
     )
