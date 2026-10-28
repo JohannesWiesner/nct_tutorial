@@ -1,4 +1,4 @@
-"""Browser regressions for issue #12; run separately from the NumPy unit tests."""
+"""Browser regressions for viewport recovery and preserving graph positions."""
 
 import json
 from threading import Thread
@@ -162,6 +162,31 @@ class ViewportTests(unittest.TestCase):
         )
         self.assertEqual(after, before)
         self.assertEqual(self.page.evaluate("window.cy.nodes(':selected').length"), 1)
+
+    def test_state_swap_preserves_dragged_positions_selection_and_layout(self):
+        before = self.page.evaluate(
+            """() => {
+                const cy = window.cy;
+                const node = cy.nodes()[0];
+                node.position({x: node.position('x') + 10, y: node.position('y') + 10});
+                node.select();
+                window.stateSwapLayoutRuns = 0;
+                cy.on('layoutstart', () => window.stateSwapLayoutRuns++);
+                return cy.nodes().map(n => ({id: n.id(), position: n.position()}));
+            }"""
+        )
+        self.page.locator("#switch-states").click()
+        self.page.wait_for_function(
+            "document.querySelector('#edit-status').textContent.includes('Switched x0 and xf')"
+        )
+        # A layout would be triggered after the render callback and its debounce.
+        self.page.wait_for_timeout(500)
+        after = self.page.evaluate(
+            "window.cy.nodes().map(n => ({id: n.id(), position: n.position()}))"
+        )
+        self.assertEqual(after, before)
+        self.assertEqual(self.page.evaluate("window.cy.nodes(':selected').length"), 1)
+        self.assertEqual(self.page.evaluate("window.stateSwapLayoutRuns"), 0)
 
 
 if __name__ == "__main__":

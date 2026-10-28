@@ -1,4 +1,5 @@
 import base64
+import copy
 import json
 import unittest
 
@@ -6,7 +7,7 @@ import numpy as np
 
 from src.graph_utils import (
     add_node, decode_upload, delete_nodes, from_adjacency_matrix,
-    matrices_from_elements, split_elements, states_from_rows, toggle_edges,
+    matrices_from_elements, same_graph_data, split_elements, states_from_rows, toggle_edges,
     validate_configuration,
 )
 
@@ -29,6 +30,24 @@ class ElementTests(unittest.TestCase):
         grouped = split_elements(flat)
         self.assertEqual(len(grouped["nodes"]), 3)
         self.assertEqual(len(grouped["edges"]), 2)
+
+    def test_graph_comparison_ignores_positions_selection_and_order(self):
+        moved = copy.deepcopy(self.elements)
+        moved["nodes"][0]["position"] = {"x": 123, "y": -456}
+        moved["nodes"][0]["selected"] = True
+        flat = list(reversed(moved["edges"] + moved["nodes"]))
+        self.assertTrue(same_graph_data(self.elements, flat))
+
+    def test_graph_comparison_detects_topology_weights_and_node_flags(self):
+        modified = copy.deepcopy(self.elements)
+        modified["edges"][0]["data"]["weight"] = 9
+        self.assertFalse(same_graph_data(self.elements, modified))
+        for flag in ("controller", "constrain"):
+            modified = copy.deepcopy(self.elements)
+            modified["nodes"][0]["data"][flag] = False
+            self.assertFalse(same_graph_data(self.elements, modified))
+        self.assertFalse(same_graph_data(self.elements, delete_nodes(self.elements, ["1"])))
+        self.assertFalse(same_graph_data(self.elements, None))
 
     def test_deleting_node_preserves_other_ids_and_removes_edges(self):
         result = delete_nodes(self.elements, ["1"])

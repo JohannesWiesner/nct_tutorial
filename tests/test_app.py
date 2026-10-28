@@ -37,6 +37,22 @@ class ViewTests(unittest.TestCase):
         figure = control_figure(np.ones((4, 2)), np.ones((3, 2)), ["0", "2"], "Control")
         self.assertEqual(sorted(len(trace.y) for trace in figure.data), [3, 3, 4, 4])
 
+    def test_control_chart_compares_both_methods_with_consistent_node_colors(self):
+        figure = control_figure(
+            np.ones((4, 2)), np.full((3, 2), 2.0), ["0", "2"], "Discrete control",
+            optimal_states=np.full((4, 2), 3.0), optimal_control=np.full((3, 2), 4.0),
+        )
+        self.assertEqual(len(figure.data), 8)
+        colors = {}
+        for trace in figure.data:
+            node, method = trace.name.split(", ")
+            colors.setdefault(node, set()).add(trace.line.color)
+            self.assertEqual(trace.line.dash, "solid" if method == "Minimum" else "dash")
+            is_state = len(trace.y) == 4
+            expected = (1 if is_state else 2) if method == "Minimum" else (3 if is_state else 4)
+            np.testing.assert_array_equal(trace.y, expected)
+        self.assertTrue(all(len(values) == 1 for values in colors.values()))
+
     def test_view_import_does_not_load_numerical_backends(self):
         result = subprocess.run(
             [sys.executable, "-c", "import sys, src.view_utils; "
@@ -82,16 +98,17 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(inputs[name]["value"], initial[name])
                 self.assertNotIn("placeholder", inputs[name])
 
-    def test_all_four_figures_render_for_default_network(self):
+    def test_default_plot_updates_discrete_control_and_preserves_continuous(self):
         result = update_figures(1, initial, initial["states"], 1, 3, 1, "discrete")
         self.assertEqual(result[-1], "")
-        self.assertTrue(all(figure.data for figure in result[:4]))
+        self.assertTrue(all(result[index].data for index in (0, 1, 3)))
+        self.assertIs(result[2], no_update)
         self.assertEqual(len(result[0].data[0].y), 4)
 
     def test_uploaded_configuration_flows_through_model_and_view(self):
         store = validate_configuration({"A": [[0, 2], [2, 0]], "x0": [1, 0],
                                         "xf": [0, 1], "c": 3, "T": 4, "rho": 2})
-        rendered = render_network(store)
+        rendered = render_network(store, initial["elements"])
         self.assertEqual(rendered[3:6], (3, 4, 2))
         result = update_figures(1, store, store["states"], store["c"], store["T"], store["rho"], store["system"])
         self.assertEqual(result[-1], "")
@@ -123,7 +140,9 @@ class AppTests(unittest.TestCase):
             "network-store.data", {"upload-data.contents": upload}, "upload-data.contents"
         )["network-store"]["data"]
         rendered = self.callback_response(
-            "cytoscape.elements", {"network-store.data": loaded}, "network-store.data"
+            "cytoscape.elements",
+            {"network-store.data": loaded, "cytoscape.elements": initial["elements"]},
+            "network-store.data",
         )
         self.assertEqual(rendered["time-system"]["value"], "continuous")
         self.assertEqual(rendered["T"]["value"], 1.25)
@@ -138,12 +157,13 @@ class AppTests(unittest.TestCase):
         )["network-store"]["data"]
         self.assertEqual((edited["system"], edited["T"]), ("discrete", 3))
         self.assertEqual(len(edited["elements"]["nodes"]), 3)
-        self.assertEqual(render_network(edited)[-1], "discrete")
+        self.assertEqual(render_network(edited, loaded["elements"])[-1], "discrete")
 
     def test_continuous_plots_use_model_times_for_all_trajectories(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "continuous")
         self.assertEqual(result[-1], "")
-        for figure in result[:3]:
+        self.assertIs(result[1], no_update)
+        for figure in (result[0], result[2]):
             self.assertEqual(figure.layout.xaxis.title.text, "Time (model units)")
             for trace in figure.data:
                 self.assertEqual(len(trace.x), 501)
@@ -159,9 +179,72 @@ class AppTests(unittest.TestCase):
             "plot.n_clicks",
         )
         self.assertEqual(response["plot-status"]["children"], "")
-        for name in ("state-trajectory", "minimum-energy", "optimal-energy"):
+        self.assertNotIn("discrete-control", response)
+        for name in ("state-trajectory", "continuous-control"):
             self.assertEqual(response[name]["figure"]["layout"]["xaxis"]["title"]["text"],
                              "Time (model units)")
+
+    def test_switching_systems_preserves_the_other_control_plot(self):
+        displayed = {}
+        for system, horizon in (("discrete", 3), ("continuous", 0.1), ("discrete", 4)):
+            previous = copy.deepcopy(displayed)
+            response = self.callback_response(
+                "state-trajectory.figure",
+                {"plot.n_clicks": 1, "network-store.data": initial,
+                 "states-table.data": initial["states"], "c.value": 1,
+                 "T.value": horizon, "rho.value": 1, "time-system.value": system},
+                "plot.n_clicks",
+            )
+            selected = f"{system}-control"
+            other = "continuous-control" if system == "discrete" else "discrete-control"
+            self.assertIn(selected, response)
+            self.assertNotIn(other, response)
+            displayed.update(response)
+            if other in previous:
+                self.assertEqual(displayed[other], previous[other])
+            methods = {trace["line"]["dash"] for trace in response[selected]["figure"]["data"]}
+            self.assertEqual(methods, {"solid", "dash"})
+
+    def test_swapping_edited_states_does_not_send_graph_or_style_updates(self):
+        rows = copy.deepcopy(initial["states"])
+        rows[0].update(x0=2.5, xf=-1.0)
+        current_elements = copy.deepcopy(initial["elements"])
+        current_elements["nodes"][0]["position"] = {"x": 100, "y": 200}
+        current_elements["nodes"][0]["selected"] = True
+        switched = self.callback_response(
+            "network-store.data",
+            {"switch-states.n_clicks": 1, "network-store.data": initial,
+             "states-table.data": rows, "c.value": 2, "T.value": 3,
+             "rho.value": 4, "time-system.value": "discrete"},
+            "switch-states.n_clicks",
+        )["network-store"]["data"]
+        self.assertEqual(switched["states"][0], {"id": "0", "x0": -1.0, "xf": 2.5})
+        rendered = self.callback_response(
+            "cytoscape.elements",
+            {"network-store.data": switched, "cytoscape.elements": current_elements},
+            "network-store.data",
+        )
+        self.assertNotIn("cytoscape", rendered)
+        self.assertNotIn("topology-metrics", rendered)
+        self.assertEqual(rendered["states-table"]["data"], switched["states"])
+        self.assertEqual(rendered["c"]["value"], 2)
+
+    def test_graph_data_changes_still_refresh_elements_styles_and_metrics(self):
+        for change in ("weight", "controller", "constrain"):
+            modified = copy.deepcopy(initial)
+            if change == "weight":
+                modified["elements"]["edges"][0]["data"]["weight"] = 4.5
+            else:
+                modified["elements"]["nodes"][0]["data"][change] = False
+            with self.subTest(change=change):
+                rendered = self.callback_response(
+                    "cytoscape.elements",
+                    {"network-store.data": modified, "cytoscape.elements": initial["elements"]},
+                    "network-store.data",
+                )
+                self.assertEqual(rendered["cytoscape"]["elements"], modified["elements"])
+                self.assertIn("stylesheet", rendered["cytoscape"])
+                self.assertIn("topology-metrics", rendered)
 
     def test_fractional_duration_is_rejected_after_switch_to_discrete(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "discrete")
