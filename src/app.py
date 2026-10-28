@@ -82,21 +82,27 @@ app.layout = dbc.Container(
                             maxZoom=4,
                             responsive=True,
                         ),
-                        html.Div(
+                        html.Section(
                             [
-                                dbc.Button(
-                                    "Fit graph", id="fit-graph", n_clicks=0,
-                                    color="secondary", outline=True,
-                                    title="Fit all nodes inside the canvas",
+                                html.Div(
+                                    [
+                                        dbc.Button(
+                                            "Fit graph", id="fit-graph", n_clicks=0,
+                                            color="secondary", outline=True,
+                                            title="Fit all nodes inside the canvas",
+                                        ),
+                                        dbc.Button(
+                                            "Plot trajectories and energy", id="plot",
+                                            color="primary", n_clicks=0,
+                                        ),
+                                    ],
+                                    className="d-flex flex-wrap gap-2",
                                 ),
-                                dbc.Button(
-                                    "Plot trajectories and energy", id="plot",
-                                    color="primary", n_clicks=0,
-                                ),
+                                html.Div(id="plot-status", className="mt-2 text-danger"),
                             ],
-                            className="d-flex flex-wrap gap-2 mt-2 flex-shrink-0",
+                            className="border rounded p-3 mt-3 flex-shrink-0",
+                            **{"aria-label": "Graph actions"},
                         ),
-                        html.Div(id="plot-status", className="mt-2 text-danger"),
                     ],
                     lg=7, id="network-panel", className="d-flex flex-column",
                 ),
@@ -129,65 +135,58 @@ app.layout = dbc.Container(
                             ],
                             className="border rounded p-3",
                         ),
+                        html.Section(
+                            [
+                                html.H4("Edit network"),
+                                html.Div(
+                                    [
+                                        dbc.ButtonGroup(
+                                            [
+                                                dbc.Button("Add node", id="add-node", n_clicks=0),
+                                                dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
+                                            ],
+                                            className="flex-shrink-0",
+                                        ),
+                                        dbc.Button(
+                                            "Connect / disconnect", id="toggle-edge", n_clicks=0,
+                                            className="flex-shrink-0",
+                                        ),
+                                        dbc.Button(
+                                            "Toggle controller", id="toggle-controller", n_clicks=0,
+                                            className="flex-shrink-0",
+                                        ),
+                                        dbc.Button(
+                                            "Toggle constraint", id="toggle-constraint", n_clicks=0,
+                                            className="flex-shrink-0",
+                                        ),
+                                        dbc.InputGroup(
+                                            [
+                                                dbc.Input(
+                                                    id="edge-weight", type="number", min=0.000001, value=1,
+                                                    style={"width": "6rem", "flex": "0 0 6rem"},
+                                                ),
+                                                dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
+                                            ],
+                                            className="w-auto flex-nowrap flex-shrink-0",
+                                        ),
+                                    ],
+                                    className="d-flex flex-nowrap gap-2 text-nowrap overflow-auto pb-2 mb-2",
+                                    role="group", **{"aria-label": "Network editing controls"},
+                                ),
+                                dcc.Upload(
+                                    id="upload-data",
+                                    children=dbc.Button("Upload JSON configuration", color="secondary"),
+                                    accept="application/json,.json",
+                                ),
+                                html.Div(id="edit-status", className="mt-2"),
+                            ],
+                            className="border rounded p-3",
+                        ),
                     ],
                     lg=5, id="network-controls", className="d-flex flex-column gap-3",
                 ),
             ],
             className="g-3 align-items-stretch",
-        ),
-        html.Section(
-            [
-                html.H4("Edit network"),
-                html.Div(
-                    [
-                        dbc.ButtonGroup(
-                            [
-                                dbc.Button("Add node", id="add-node", n_clicks=0),
-                                dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
-                            ],
-                            className="flex-shrink-0",
-                        ),
-                        dbc.Button(
-                            "Connect / disconnect", id="toggle-edge", n_clicks=0,
-                            className="flex-shrink-0",
-                        ),
-                        dbc.Button(
-                            "Toggle controller", id="toggle-controller", n_clicks=0,
-                            className="flex-shrink-0",
-                        ),
-                        dbc.Button(
-                            "Toggle constraint", id="toggle-constraint", n_clicks=0,
-                            className="flex-shrink-0",
-                        ),
-                        dbc.InputGroup(
-                            [
-                                dbc.Input(
-                                    id="edge-weight", type="number", min=0.000001, value=1,
-                                    style={"width": "6rem", "flex": "0 0 6rem"},
-                                ),
-                                dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
-                            ],
-                            className="w-auto flex-nowrap flex-shrink-0",
-                        ),
-                    ],
-                    className="d-flex flex-nowrap gap-2 text-nowrap overflow-auto pb-2 mb-2",
-                    role="group", **{"aria-label": "Network editing controls"},
-                ),
-                dcc.Upload(
-                    id="upload-data",
-                    children=dbc.Button("Upload JSON configuration", color="secondary"),
-                    accept="application/json,.json",
-                ),
-                html.Div(id="edit-status", className="mt-2"),
-            ],
-            className="border rounded p-3 mt-3",
-        ),
-        html.Section(
-            [
-                html.H3("Topology measures"),
-                dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
-            ],
-            className="border rounded p-3 mt-4",
         ),
         html.Section(
             [
@@ -205,6 +204,13 @@ app.layout = dbc.Container(
                     ],
                     className="g-0 mt-3",
                 ),
+            ],
+            className="border rounded p-3 mt-4",
+        ),
+        html.Section(
+            [
+                html.H3("Topology measures"),
+                dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
             ],
             className="border rounded p-3 mt-4",
         ),
