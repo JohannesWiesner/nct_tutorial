@@ -129,45 +129,58 @@ app.layout = dbc.Container(
                             ],
                             className="border rounded p-3",
                         ),
-                        html.Section(
-                            [
-                                html.H4("Edit network"),
-                                dbc.ButtonGroup(
-                                    [
-                                        dbc.Button("Add node", id="add-node", n_clicks=0),
-                                        dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
-                                    ],
-                                    className="mb-2",
-                                ),
-                                html.Div(
-                                    [
-                                        dbc.Button("Connect / disconnect", id="toggle-edge", n_clicks=0),
-                                        dbc.Button("Toggle controller", id="toggle-controller", n_clicks=0),
-                                        dbc.Button("Toggle constraint", id="toggle-constraint", n_clicks=0),
-                                    ],
-                                    className="mb-2 d-flex flex-wrap gap-2",
-                                ),
-                                dbc.InputGroup(
-                                    [
-                                        dbc.Input(id="edge-weight", type="number", min=0.000001, value=1),
-                                        dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
-                                    ],
-                                    className="mb-3",
-                                ),
-                                dcc.Upload(
-                                    id="upload-data",
-                                    children=dbc.Button("Upload JSON configuration", color="secondary"),
-                                    accept="application/json,.json",
-                                ),
-                                html.Div(id="edit-status", className="mt-2"),
-                            ],
-                            className="border rounded p-3",
-                        ),
                     ],
                     lg=5, id="network-controls", className="d-flex flex-column gap-3",
                 ),
             ],
             className="g-3 align-items-stretch",
+        ),
+        html.Section(
+            [
+                html.H4("Edit network"),
+                html.Div(
+                    [
+                        dbc.ButtonGroup(
+                            [
+                                dbc.Button("Add node", id="add-node", n_clicks=0),
+                                dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
+                            ],
+                            className="flex-shrink-0",
+                        ),
+                        dbc.Button(
+                            "Connect / disconnect", id="toggle-edge", n_clicks=0,
+                            className="flex-shrink-0",
+                        ),
+                        dbc.Button(
+                            "Toggle controller", id="toggle-controller", n_clicks=0,
+                            className="flex-shrink-0",
+                        ),
+                        dbc.Button(
+                            "Toggle constraint", id="toggle-constraint", n_clicks=0,
+                            className="flex-shrink-0",
+                        ),
+                        dbc.InputGroup(
+                            [
+                                dbc.Input(
+                                    id="edge-weight", type="number", min=0.000001, value=1,
+                                    style={"width": "6rem", "flex": "0 0 6rem"},
+                                ),
+                                dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
+                            ],
+                            className="w-auto flex-nowrap flex-shrink-0",
+                        ),
+                    ],
+                    className="d-flex flex-nowrap gap-2 text-nowrap overflow-auto pb-2 mb-2",
+                    role="group", **{"aria-label": "Network editing controls"},
+                ),
+                dcc.Upload(
+                    id="upload-data",
+                    children=dbc.Button("Upload JSON configuration", color="secondary"),
+                    accept="application/json,.json",
+                ),
+                html.Div(id="edit-status", className="mt-2"),
+            ],
+            className="border rounded p-3 mt-3",
         ),
         html.Section(
             [
