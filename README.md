@@ -11,7 +11,8 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 - Connect selected nodes, remove selected edges, and edit edge weights.
 - Select controller and constrained nodes.
 - Edit or swap initial and target states.
-- Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, and `rho` configuration.
+- Choose discrete or continuous time, with matching dynamics and energy calculations.
+- Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, `rho`, and `system` configuration.
 - Inspect density, degree, strength, and clustering as the topology changes.
 - Plot uncontrolled trajectories, minimum/optimal control inputs, and aggregate energy per node.
 
@@ -20,10 +21,11 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 ```bash
 conda env create -f environment.yml
 conda activate nct-tutorial
-python app.py
+python -m src.app
 ```
 
-Open <http://localhost:8050>.
+Run these commands from the repository root, then open <http://localhost:8050>.
+For Gunicorn, use `gunicorn --bind 0.0.0.0:8050 src.app:server`.
 
 ## Run with Docker
 
@@ -38,6 +40,12 @@ Open <http://localhost:8050>. The container uses Miniconda and serves the app wi
 
 Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c`, `T`, and `rho` are optional and default to `1`, `3`, and `1` respectively.
 
+`system` is optional and accepts `"discrete"` (the default) or `"continuous"`.
+Discrete `T` must be a positive integer; continuous `T` is a positive duration
+in increments of `0.001`, for example `0.5` or `1.25`. Older JSON files without
+`system` continue to use discrete time. Uploading a configuration also updates
+the time-system selector and the horizon label.
+
 ```json
 {
   "A": [[0, 1], [1, 0]],
@@ -47,7 +55,8 @@ Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matric
   "T": 3,
   "x0": [1, 0],
   "xf": [0, 1],
-  "rho": 1
+  "rho": 1,
+  "system": "discrete"
 }
 ```
 
@@ -57,27 +66,45 @@ See [`example-config.json`](example-config.json) for a ready-to-upload example.
 
 | Module | Responsibility |
 | --- | --- |
-| `nct_utils.py` | Numerical model: nctpy normalization/control solutions, bct topology metrics, and energy aggregation. Accepts arrays and returns numerical results. |
-| `graph_utils.py` | Cytoscape editing, upload validation, UI state, and conversion between graph elements and model arrays. |
-| `view_utils.py` | Cytoscape styles, persistent parameter labels, topology cards, and Plotly figures. Consumes precomputed metrics and energies. |
-| `app.py` | Dash layout and controller callbacks that coordinate the helpers. |
+| `src/nct_utils.py` | Numerical model: nctpy normalization/control solutions, bct topology metrics, and energy aggregation. Accepts arrays and returns numerical results. |
+| `src/graph_utils.py` | Cytoscape editing, upload validation, UI state, and conversion between graph elements and model arrays. |
+| `src/view_utils.py` | Cytoscape styles, persistent parameter labels, topology cards, and Plotly figures. Consumes precomputed metrics, energies, and time coordinates. |
+| `src/time_utils.py` | Shared time-system validation and sampling conventions. |
+| `src/app.py` | Dash layout and controller callbacks that coordinate the helpers. |
 
-Graph helpers previously imported from `nct_utils` now live in `graph_utils`.
+Application modules are grouped in the `src` package; tests remain under `tests/`.
+Import helpers using paths such as `from src.graph_utils import node_ids`.
+The app resolves `assets/` relative to the repository root, including in Docker.
 Each helper documents its input format, return values, and relevant conventions.
 
 ## Numerical conventions
 
-All trajectories use discrete dynamics, `x(t+1) = A_normalized x(t) + B u(t)`.
-`c` is passed explicitly to nctpy's discrete normalization. `T` is the number
-of transitions: plots contain `T+1` states and `T` control inputs. `rho`
-weights control-input cost in the optimal solution; minimum-energy control
-uses a zero state-constraint matrix. Energy per node is the sum of squared
-inputs across the `T` steps.
+The **Time system** selector applies to normalization, uncontrolled trajectories,
+both control solutions, time axes, and energy calculations. Discrete time is the
+default. After changing a parameter or system, click **Plot trajectories and
+energy** to recompute the figures.
 
-This replaces the earlier combination of discrete state simulation and a
-continuous control solver. nctpy handles `T >= 2`; the one-step case is solved
-directly from `B u = xf - A_normalized x0`, with unreachable targets reported
-as input errors. Both control solutions retain the solver's numerical residuals.
+| Convention | Discrete | Continuous |
+| --- | --- | --- |
+| Dynamics | `x(t+1) = A_normalized x(t) + B u(t)` | `dx/dt = A_normalized x(t) + B u(t)` |
+| Horizon `T` | Positive integer number of transitions | Positive duration in model time units, in increments of `0.001` |
+| State/input samples | `T+1` states and `T` inputs | Both sampled every `0.001`, including `t=0` and `t=T` |
+| Per-node energy | Sum of squared inputs | Integral of squared inputs over model time |
+
+`c` is passed explicitly to nctpy's normalization for the selected system.
+Continuous normalization includes the identity subtraction required for stable
+continuous dynamics. The uncontrolled continuous trajectory uses a matrix
+exponential at each sample interval. Continuous energy uses nctpy's Simpson
+integration multiplied by `0.001`; its unscaled `integrate_u` result integrates
+over sample indices rather than model time. See the nctpy documentation on
+[time systems](https://control-package.readthedocs.io/en/latest/guide/time_systems.html) and
+[energy measures](https://control-package.readthedocs.io/en/latest/guide/energies.html).
+
+`rho` weights control-input cost in the optimal solution; minimum-energy control
+uses a zero state-constraint matrix. For discrete `T=1`, the tutorial solves
+`B u = xf - A_normalized x0` directly and reports unreachable targets as input
+errors. Continuous `T=1` uses the continuous solver. Both control solutions
+retain the solver's numerical residuals.
 
 Topology cards use bct's undirected density, degree, and binary clustering.
 Mean strength uses absolute edge weights. Self-loops are excluded from these

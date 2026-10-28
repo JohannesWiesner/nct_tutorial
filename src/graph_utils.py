@@ -13,6 +13,8 @@ from typing import Any, Iterable, Mapping
 
 import numpy as np
 
+from .time_utils import validate_horizon, validate_time_system
+
 
 def node_sort_key(node_id: str) -> tuple[int, int | str]:
     """Return a stable ordering key for a Cytoscape node ID.
@@ -143,7 +145,8 @@ def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate uploaded model data and build a JSON-safe UI store.
 
     A is required; B/S default to identity, x0/xf to zero, and c/T/rho to
-    1/3/1. Return grouped Cytoscape elements, state-table rows, and scalar
+    1/3/1. system defaults to discrete; continuous durations use increments
+    of 0.001. Return grouped Cytoscape elements, state-table rows, and scalar
     parameters. Invalid shapes, states, or parameter values raise ValueError.
     """
     if not isinstance(payload, Mapping):
@@ -170,12 +173,8 @@ def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
             raise ValueError(f"{name} must be a positive number")
         return value
 
-    time_horizon = payload.get("T", 3)
-    if isinstance(time_horizon, bool) or int(time_horizon) != float(time_horizon):
-        raise ValueError("T must be a positive integer")
-    time_horizon = int(time_horizon)
-    if time_horizon < 1:
-        raise ValueError("T must be a positive integer")
+    system = validate_time_system(payload.get("system", "discrete"))
+    time_horizon = validate_horizon(payload.get("T", 3), system)
 
     x0_values = vector("x0", np.zeros(size))
     xf_values = vector("xf", np.zeros(size))
@@ -188,6 +187,7 @@ def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
         "c": positive_number("c", 1.0),
         "T": time_horizon,
         "rho": positive_number("rho", 1.0),
+        "system": system,
     }
 
 
@@ -385,7 +385,7 @@ def default_store(adjacency: np.ndarray) -> dict:
     """Create reproducible initial UI data for an adjacency matrix.
 
     Seeded initial/target values are stored by node ID alongside grouped
-    elements and the default c/T/rho parameters.
+    elements and the default c/T/rho parameters and discrete time system.
     """
     rng = np.random.default_rng(28)
     ids = [str(index) for index in range(len(adjacency))]
@@ -398,6 +398,7 @@ def default_store(adjacency: np.ndarray) -> dict:
         "c": 1.0,
         "T": 3,
         "rho": 1.0,
+        "system": "discrete",
     }
 
 
