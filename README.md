@@ -92,9 +92,8 @@ the lower-right figure is reserved for **optimal control energy** trajectories.
 Each contains only its own method's states and inputs. Both use the selected
 time system and update when you click **Plot trajectories and energy**. The
 method appears in each title, with one time-axis title beneath the bottom
-panel indicating the time units. The uncontrolled trajectory and aggregate-energy
-chart show the selected system in their titles. Minimum and optimal control
-are available in both time systems.
+panel indicating the time units. Minimum and optimal control are available in
+both time systems.
 
 | Convention | Discrete | Continuous |
 | --- | --- | --- |

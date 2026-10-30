@@ -154,7 +154,6 @@ def empty_control_figure(title: str) -> go.Figure:
 
 def energy_figure(
     minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: list[str],
-    *, system: str | None = None,
 ) -> go.Figure:
     """Compare already-computed minimum and optimal energy per node.
 
@@ -177,7 +176,7 @@ def energy_figure(
         y="Energy",
         color="Method",
         barmode="group",
-        title="Aggregate control energy by node" + (f" ({system})" if system else ""),
+        title="Aggregate control energy by node",
     )
     figure.update_layout(title_x=0.5)
     return figure
