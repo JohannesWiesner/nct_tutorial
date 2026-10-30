@@ -83,11 +83,26 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(inputs[name]["value"], initial[name])
                 self.assertNotIn("placeholder", inputs[name])
 
-    def test_default_plot_updates_both_control_methods(self):
-        result = update_figures(1, initial, initial["states"], 1, 3, 1, "discrete")
+    def test_default_plot_uses_continuous_time_for_both_control_methods(self):
+        nodes = list(components(app.server.test_client().get("/_dash-layout").get_json()))
+        props = {node["props"]["id"]: node["props"]
+                 for node in nodes if "id" in node["props"]}
+        self.assertEqual(initial["system"], "continuous")
+        self.assertEqual(props["time-system"]["value"], "continuous")
+        self.assertEqual(props["T-label"]["children"], "Time duration (T)")
+        self.assertEqual((props["T"]["min"], props["T"]["step"]), (0.001, 0.001))
+        result = update_figures(
+            1, props["network-store"]["data"], props["states-table"]["data"],
+            props["c"]["value"], props["T"]["value"], props["rho"]["value"],
+            props["time-system"]["value"],
+        )
         self.assertEqual(result[-1], "")
         self.assertTrue(all(figure.data for figure in result[:4]))
-        self.assertEqual(len(result[0].data[0].y), 4)
+        for figure in result[:3]:
+            self.assertEqual(figure.layout.xaxis.title.text, "Time (model units)")
+            for trace in figure.data:
+                self.assertEqual(len(trace.y), round(props["T"]["value"] / 0.001) + 1)
+                self.assertAlmostEqual(trace.x[-1], props["T"]["value"])
 
     def test_uploaded_configuration_flows_through_model_and_view(self):
         store = validate_configuration({"A": [[0, 2], [2, 0]], "x0": [1, 0],
@@ -179,7 +194,15 @@ class AppTests(unittest.TestCase):
                 with self.subTest(system=system, method=method):
                     figure = response[name]["figure"]
                     self.assertEqual(figure["layout"]["title"]["text"],
-                                     f"{method} control energy trajectories ({system})")
+                                     f"{method} control energy trajectories")
+                    titled_axes = [axis for key, axis in figure["layout"].items()
+                                   if key.startswith("xaxis") and axis.get("title", {}).get("text")]
+                    self.assertEqual(len(titled_axes), 1)
+                    self.assertEqual(titled_axes[0]["title"]["text"],
+                                     "Time step" if system == "discrete" else "Time (model units)")
+                    # The title belongs to the bottom panel, not the state panel above it.
+                    anchor = titled_axes[0]["anchor"].replace("y", "yaxis", 1)
+                    self.assertEqual(figure["layout"][anchor]["domain"][0], 0)
                     self.assertEqual(len(figure["data"]), 2 * len(initial["states"]))
                     self.assertEqual({trace["name"] for trace in figure["data"]},
                                      {row["id"] for row in initial["states"]})

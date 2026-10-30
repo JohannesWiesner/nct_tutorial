@@ -401,7 +401,7 @@ def default_store(adjacency: np.ndarray) -> dict:
     """Create reproducible initial UI data for an adjacency matrix.
 
     Seeded initial/target values are stored by node ID alongside grouped
-    elements and the default c/T/rho parameters and discrete time system.
+    elements and the default c/T/rho parameters and continuous time system.
     """
     rng = np.random.default_rng(28)
     ids = [str(index) for index in range(len(adjacency))]
@@ -414,7 +414,7 @@ def default_store(adjacency: np.ndarray) -> dict:
         "c": 1.0,
         "T": 3,
         "rho": 1.0,
-        "system": "discrete",
+        "system": "continuous",
     }
 
 
