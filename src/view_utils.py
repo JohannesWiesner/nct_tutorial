@@ -111,7 +111,8 @@ def control_figure(
     different row counts: T control inputs connect T+1 discrete states.
     Explicit time arrays keep continuous sample indices out of the axes.
     The caller supplies either the minimum-energy or optimal-control
-    solution; each figure contains only that method's trajectories.
+    solution; each figure contains only that method's trajectories,
+    with a shared time-axis title beneath the bottom panel.
     """
     frames = []
     for values, kind, times in ((states, "State x", state_times), (control, "Input u", input_times)):
@@ -130,7 +131,11 @@ def control_figure(
         title=title,
     )
     figure.update_layout(title_x=0.5)
-    figure.update_xaxes(title_text="Time step" if system == "discrete" else "Time (model units)")
+    figure.update_xaxes(title_text=None)
+    figure.update_xaxes(
+        title_text="Time step" if system == "discrete" else "Time (model units)",
+        row=1, col=1,
+    )
     return figure
 
 
@@ -149,7 +154,6 @@ def empty_control_figure(title: str) -> go.Figure:
 
 def energy_figure(
     minimum_energy: np.ndarray, optimal_energy: np.ndarray, ids: list[str],
-    *, system: str | None = None,
 ) -> go.Figure:
     """Compare already-computed minimum and optimal energy per node.
 
@@ -172,7 +176,7 @@ def energy_figure(
         y="Energy",
         color="Method",
         barmode="group",
-        title="Aggregate control energy by node" + (f" ({system})" if system else ""),
+        title="Aggregate control energy by node",
     )
     figure.update_layout(title_x=0.5)
     return figure
@@ -194,7 +198,7 @@ def parameter_controls(parameters: dict) -> html.Div:
 
     Labels remain visible when inputs contain values, and their htmlFor
     attributes associate them with the matching fields. Shared grid rows
-    keep inputs level when labels wrap, with horizon help beneath T.
+    keep inputs level when labels wrap, with help beneath each input.
     """
     system = parameters.get("system", "discrete")
     horizon_label, minimum, step, help_text = horizon_control_settings(system)
@@ -225,6 +229,12 @@ def parameter_controls(parameters: dict) -> html.Div:
             for name, label, minimum, step in specs
         ],
     ]
+    descriptions = {
+        "time-system": ("time-system-help", "Choose continuous dynamics or discrete time steps."),
+        "T": ("time-horizon-help", help_text),
+        "c": ("normalization-help", "Positive constant that stabilizes the network dynamics."),
+        "rho": ("control-weight-help", "Higher values penalize control effort more in optimal control."),
+    }
     children = []
     for column, (name, label, control) in enumerate(fields, start=1):
         children.append(html.Label(
@@ -234,10 +244,11 @@ def parameter_controls(parameters: dict) -> html.Div:
         ))
         control.style = {"gridColumn": column, "gridRow": 2, "minWidth": 0}
         children.append(control)
-    children.append(html.Small(
-        help_text, id="time-horizon-help", className="text-muted",
-        style={"gridColumn": 2, "gridRow": 3},
-    ))
+        help_id, description = descriptions[name]
+        children.append(html.Small(
+            description, id=help_id, className="text-muted",
+            style={"gridColumn": column, "gridRow": 3},
+        ))
     return html.Div(
         children,
         className="d-grid gap-2",

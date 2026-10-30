@@ -397,20 +397,20 @@ def update_figures(_clicks, store, state_rows, c, time_horizon, rho, system):
         )
         return (
             trajectory_figure(
-                result.uncontrolled, ids, f"Uncontrolled state trajectory ({system})",
+                result.uncontrolled, ids, "Uncontrolled state trajectory",
                 times=result.state_times, system=result.system,
             ),
             control_figure(
                 result.minimum.states, result.minimum.inputs, ids,
-                f"Minimum control energy trajectories ({system})",
+                "Minimum control energy trajectories",
                 state_times=result.state_times, input_times=result.input_times, system=result.system,
             ),
             control_figure(
                 result.optimal.states, result.optimal.inputs, ids,
-                f"Optimal control energy trajectories ({system})",
+                "Optimal control energy trajectories",
                 state_times=result.state_times, input_times=result.input_times, system=result.system,
             ),
-            energy_figure(result.minimum.energy, result.optimal.energy, ids, system=system),
+            energy_figure(result.minimum.energy, result.optimal.energy, ids),
             "",
         )
     except (KeyError, TypeError, ValueError, np.linalg.LinAlgError) as error:

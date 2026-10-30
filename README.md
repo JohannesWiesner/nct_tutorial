@@ -11,7 +11,7 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 - Connect selected nodes, remove selected edges, and edit edge weights.
 - Select controller and constrained nodes.
 - Edit or swap initial and target states while preserving the graph layout.
-- Choose discrete or continuous time, with matching dynamics and energy calculations.
+- Start in continuous time, or choose discrete time, with matching dynamics and energy calculations.
 - Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, `rho`, and `system` configuration.
 - Inspect density, degree, strength, and clustering as the topology changes.
 - Compare minimum-energy trajectories in the lower-left plot and optimal-control trajectories in the lower-right plot for the selected time system.
@@ -41,10 +41,11 @@ Open <http://localhost:8050>. The container uses Miniconda and serves the app wi
 
 Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c`, `T`, and `rho` are optional and default to `1`, `3`, and `1` respectively.
 
-`system` is optional and accepts `"discrete"` (the default) or `"continuous"`.
+`system` is optional and accepts `"discrete"` or `"continuous"`.
 Discrete `T` must be a positive integer; continuous `T` is a positive duration
 in increments of `0.001`, for example `0.5` or `1.25`. Older JSON files without
-`system` continue to use discrete time. Uploading a configuration also updates
+`system` continue to use discrete time for compatibility, even though new app
+sessions start in continuous time. Uploading a configuration also updates
 the time-system selector and the horizon label.
 
 ```json
@@ -81,17 +82,18 @@ Each helper documents its input format, return values, and relevant conventions.
 ## Numerical conventions
 
 The **Time system** selector applies to normalization, uncontrolled trajectories,
-both control solutions, time axes, and energy calculations. Discrete time is the
-default. After changing a parameter or system, click **Plot trajectories and
+both control solutions, time axes, and energy calculations. New app sessions
+default to continuous time. Short descriptions beneath each parameter explain
+its role. After changing a parameter or system, click **Plot trajectories and
 energy** to recompute the figures.
 
 The lower-left figure is reserved for **minimum control energy** trajectories;
 the lower-right figure is reserved for **optimal control energy** trajectories.
 Each contains only its own method's states and inputs. Both use the selected
 time system and update when you click **Plot trajectories and energy**. The
-method and time system appear in each title. The uncontrolled trajectory and
-aggregate-energy chart also show the selected system. Minimum and optimal
-control are available in both time systems.
+method appears in each title, with one time-axis title beneath the bottom
+panel indicating the time units. Minimum and optimal control are available in
+both time systems.
 
 | Convention | Discrete | Continuous |
 | --- | --- | --- |
