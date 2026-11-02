@@ -2,10 +2,9 @@ FROM continuumio/miniconda3:24.5.0-0
 
 WORKDIR /app
 
+# install miniconda and create an environment
 COPY environment.yml requirements.txt ./
-RUN conda env create -f environment.yml \
-    && conda clean --all --yes
-
+RUN conda env create -f environment.yml && conda clean --all --yes
 COPY src ./src
 COPY assets ./assets
 
