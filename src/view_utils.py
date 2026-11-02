@@ -1,5 +1,7 @@
 """View helpers for Cytoscape styles, Dash controls, and Plotly figures.
 
+Cytoscape styles, persistent parameter labels, topology cards, and Plotly figures. Consumes precomputed metrics, energies, and time coordinates.
+
 Functions here consume UI data or computed model results. They never run
 control solvers or compute structural-connectivity metrics.
 """

@@ -1,4 +1,8 @@
-"""Interactive Network Control Theory tutorial."""
+"""Interactive Network Control Theory tutorial.
+
+Dash layout and controller callbacks that coordinate the helpers.
+
+"""
 
 from __future__ import annotations
 

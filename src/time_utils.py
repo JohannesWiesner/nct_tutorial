@@ -1,4 +1,8 @@
-"""Time-system conventions shared by configuration, model, and UI helpers."""
+"""Time-system conventions shared by configuration, model, and UI helpers.
+
+Shared time-system validation and sampling conventions.
+
+"""
 
 from __future__ import annotations
 

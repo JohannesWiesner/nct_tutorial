@@ -1,5 +1,7 @@
 """Numerical model for the network control tutorial.
 
+Numerical model: nctpy normalization/control solutions, bct topology metrics, and energy aggregation. Accepts arrays and returns numerical results
+
 This module accepts arrays and returns arrays/scalars. nctpy supplies the
 continuous/discrete control solver and normalization; bct supplies topology metrics.
 It has no dependency on Dash, Plotly, or Cytoscape element dictionaries.

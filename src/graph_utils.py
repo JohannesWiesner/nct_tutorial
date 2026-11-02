@@ -1,5 +1,7 @@
 """Cytoscape editing, configuration parsing, and adapters to model arrays.
 
+Cytoscape editing, upload validation, UI state, and conversion between graph elements and model arrays.
+
 This module owns the UI data representation. It does not compute control
 solutions or topology metrics, and it does not build figures.
 """
