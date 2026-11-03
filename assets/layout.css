@@ -1,0 +1,112 @@
+/* Let the top columns and their contents shrink within the viewport. */
+#network-panel,
+#network-controls,
+#network-controls > section {
+    min-width: 0;
+    max-width: 100%;
+}
+
+#network-controls {
+    container-type: inline-size;
+}
+
+.parameter-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.5rem 0.75rem;
+}
+
+.parameter-field {
+    display: grid;
+    grid-template-rows: auto auto 1fr;
+    align-items: start;
+    gap: 0.5rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.parameter-field input,
+.parameter-field select {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* Keep labels, inputs, and help aligned while fields wrap as whole units. */
+@supports (grid-template-rows: subgrid) {
+    .parameter-field {
+        grid-template-rows: subgrid;
+        grid-row: span 3;
+    }
+}
+
+@container (min-width: 22rem) {
+    .parameter-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@container (min-width: 42rem) {
+    .parameter-grid {
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
+}
+
+.network-toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.network-toolbar > *,
+#network-controls .btn,
+#network-controls .input-group {
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal;
+}
+
+.network-toolbar .edge-weight-control {
+    flex: 1 1 22rem;
+    flex-wrap: nowrap;
+}
+
+.edge-weight-control input {
+    flex: 0 1 6rem;
+    width: 6rem;
+    min-width: 3rem;
+}
+
+.edge-weight-control button {
+    flex: 1 1 10rem;
+}
+
+#states-table,
+#states-table .dash-spreadsheet-container {
+    min-width: 0;
+    max-width: 100%;
+}
+
+#states-table table {
+    width: 100%;
+    table-layout: fixed;
+}
+
+#states-table input {
+    min-width: 0;
+    max-width: 100%;
+}
+
+#edit-status,
+#plot-status {
+    overflow-wrap: anywhere;
+}
+
+.node-role-key {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+}
+
+.node-role-key img {
+    flex: none;
+}

@@ -8,6 +8,8 @@ control solvers or compute structural-connectivity metrics.
 
 from __future__ import annotations
 
+from urllib.parse import quote
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -19,11 +21,31 @@ from .graph_utils import split_elements
 from .time_utils import CONTINUOUS_TIME_STEP, validate_time_system
 
 
+# The same SVGs are used on the canvas and in the legend. Opaque discs keep
+# crossing edges out of the icons; shapes and fixed positions also encode roles.
+def _badge_svg(symbol: str, color: str) -> str:
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20">'
+        '<circle cx="10" cy="10" r="9.25" fill="white" stroke="#8793a1" stroke-width="1.5"/>'
+        f'<g fill="none" stroke="{color}" stroke-width="1.5" '
+        f'stroke-linecap="round" stroke-linejoin="round">{symbol}</g></svg>'
+    )
+    return "data:image/svg+xml;charset=utf-8," + quote(svg, safe="")
+
+
+CONTROL_BADGE = _badge_svg('<path d="M11 3.5 5.5 11H10l-1 5.5 5.5-8H10Z"/>', "#2364ad")
+PENALTY_BADGE = _badge_svg(
+    '<circle cx="10" cy="10" r="5.5"/><circle cx="10" cy="10" r="2.5"/>'
+    '<circle cx="10" cy="10" r="0.75" fill="#a8540b" stroke="none"/>',
+    "#a8540b",
+)
+
+
 def stylesheet_for(elements: dict) -> list[dict]:
     """Build Cytoscape styles for the current graph.
 
-    Node borders indicate controller/constraint flags. Edge widths scale
-    with the current weight range, including empty or equal-weight networks.
+    Fixed rim badges indicate B/S roles without changing node geometry.
+    Edge widths encode weights; edges have no text labels.
     """
     grouped = split_elements(elements)
     weights = [float(edge["data"].get("weight", 1)) for edge in grouped["edges"]]
@@ -32,25 +54,66 @@ def stylesheet_for(elements: dict) -> list[dict]:
     if np.isclose(low, high):
         high = low + 1.0
     return [
-        {"selector": "node", "style": {"content": "data(label)"}},
         {
-            "selector": "[?controller][?constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "solid"},
+            "selector": "node",
+            "style": {
+                "label": "data(label)", "width": 48, "height": 48,
+                "font-size": 16, "font-weight": 600, "color": "#182230",
+                "text-valign": "center", "text-halign": "center",
+                "background-color": "#f4f6f9", "border-width": 1.5,
+                "border-color": "#8793a1", "border-style": "solid",
+                "background-image": [CONTROL_BADGE, PENALTY_BADGE],
+                "background-width": [20, 20], "background-height": [20, 20],
+                "background-position-x": ["0%", "100%"],
+                "background-position-y": ["0%", "0%"],
+                "background-offset-x": [-5, 5], "background-offset-y": [-7, -7],
+                "background-clip": ["none", "none"],
+                "background-image-containment": ["over", "over"],
+                "background-image-opacity": [0, 0],
+                # Reserve badge and selection extents even when roles are off.
+                "bounds-expansion": 10,
+            },
         },
         {
-            "selector": "[?controller][!constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "dashed"},
+            "selector": "node[?controller][?constrain]",
+            "style": {"background-image-opacity": [1, 1]},
         },
         {
-            "selector": "[!controller][?constrain]",
-            "style": {"border-width": 2, "border-color": "black", "border-style": "dotted"},
+            "selector": "node[?controller][!constrain]",
+            "style": {"background-image-opacity": [1, 0]},
         },
-        {"selector": "[!controller][!constrain]", "style": {}},
+        {
+            "selector": "node[!controller][?constrain]",
+            "style": {"background-image-opacity": [0, 1]},
+        },
+        {
+            "selector": "node:selected",
+            "style": {
+                "border-color": "#6d28d9", "underlay-color": "#6d28d9",
+                "underlay-opacity": 0.25, "underlay-padding": 5, "underlay-shape": "ellipse",
+            },
+        },
         {
             "selector": "edge",
-            "style": {"width": f"mapData(weight,{low},{high},1,6)", "label": "data(weight)"},
+            "style": {"width": f"mapData(weight,{low},{high},1,6)", "label": ""},
         },
     ]
+
+
+def node_role_legend() -> html.Div:
+    """Keep role meanings visible without requiring color or hover tooltips."""
+    return html.Div(
+        [
+            html.Div([
+                html.Span([html.Img(src=CONTROL_BADGE, alt="", width=20, height=20),
+                           "Control input (B)"], className="node-role-key"),
+                html.Span([html.Img(src=PENALTY_BADGE, alt="", width=20, height=20),
+                           "State penalty (S)"], className="node-role-key"),
+            ], className="d-flex flex-wrap gap-3"),
+            html.Small("S weights the state-cost term in optimal control.", className="text-muted"),
+        ],
+        className="node-role-legend mt-3", role="note", **{"aria-label": "Node roles"},
+    )
 
 
 def metric_cards(metrics: dict) -> list:
@@ -196,7 +259,7 @@ def horizon_control_settings(system: str) -> tuple[str, float, float, str]:
 
 
 def parameter_controls(parameters: dict) -> html.Div:
-    """Build one aligned row of time-system, T, c, and rho controls.
+    """Build responsive, aligned time-system, T, c, and rho controls.
 
     Labels remain visible when inputs contain values, and their htmlFor
     attributes associate them with the matching fields. Shared grid rows
@@ -238,21 +301,17 @@ def parameter_controls(parameters: dict) -> html.Div:
         "rho": ("control-weight-help", "Higher values penalize control effort more in optimal control."),
     }
     children = []
-    for column, (name, label, control) in enumerate(fields, start=1):
-        children.append(html.Label(
-            label, htmlFor=name, className="form-label mb-0",
-            style={"gridColumn": column, "gridRow": 1, "overflowWrap": "anywhere"},
-            **({"id": "T-label"} if name == "T" else {}),
-        ))
-        control.style = {"gridColumn": column, "gridRow": 2, "minWidth": 0}
-        children.append(control)
+    for name, label, control in fields:
         help_id, description = descriptions[name]
-        children.append(html.Small(
-            description, id=help_id, className="text-muted",
-            style={"gridColumn": column, "gridRow": 3},
+        children.append(html.Div(
+            [
+                html.Label(
+                    label, htmlFor=name, className="form-label mb-0",
+                    **({"id": "T-label"} if name == "T" else {}),
+                ),
+                control,
+                html.Small(description, id=help_id, className="text-muted"),
+            ],
+            className="parameter-field",
         ))
-    return html.Div(
-        children,
-        className="d-grid gap-2",
-        style={"gridTemplateColumns": "repeat(4, minmax(0, 1fr))", "alignItems": "start"},
-    )
+    return html.Div(children, className="parameter-grid")

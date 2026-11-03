@@ -63,18 +63,25 @@ def node_ids(elements: Mapping[str, list] | list) -> list[str]:
     )
 
 
-def same_graph_data(first: Mapping[str, list] | list, second: Mapping[str, list] | list) -> bool:
+def same_graph_data(
+    first: Mapping[str, list] | list, second: Mapping[str, list] | list,
+    *, ignore_node_roles: bool = False,
+) -> bool:
     """Compare node/edge data while ignoring positions, selection, and ordering.
 
     Cytoscape owns the current visual layout. State-table or parameter
     edits should not resend stored coordinates and restart that layout.
-    IDs, weights, and controller/constraint flags still count as changes.
+    Role-only changes can be excluded to update badges without resetting
+    positions. IDs, labels, edges, and weights still count as changes.
     """
     def data_by_id(elements):
-        return {
-            group: {str(element["data"]["id"]): element["data"] for element in entries}
-            for group, entries in split_elements(elements).items()
-        }
+        grouped = split_elements(elements)
+        if ignore_node_roles:
+            for node in grouped["nodes"]:
+                for flag in ("controller", "constrain"):
+                    node["data"].pop(flag, None)
+        return {group: {str(element["data"]["id"]): element["data"] for element in entries}
+                for group, entries in grouped.items()}
 
     return data_by_id(first) == data_by_id(second)
 
@@ -162,9 +169,9 @@ def _diagonal_flags(matrix: Any, size: int, name: str) -> list[bool]:
 def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
     """Validate uploaded model data and build a JSON-safe UI store.
 
-    A is required; B/S default to identity, x0/xf to zero, and c/T/rho to
-    1/3/1. system defaults to discrete; continuous durations use increments
-    of 0.001. Return grouped Cytoscape elements, state-table rows, and scalar
+    A is required; B/S default to identity, x0/xf to zero, and c/rho to 1.
+    system defaults to discrete, with T=3; continuous defaults to T=1 and
+    uses increments of 0.001. Return elements, state-table rows, and scalar
     parameters. Invalid shapes, states, or parameter values raise ValueError.
     """
     if not isinstance(payload, Mapping):
@@ -192,7 +199,7 @@ def validate_configuration(payload: Mapping[str, Any]) -> dict[str, Any]:
         return value
 
     system = validate_time_system(payload.get("system", "discrete"))
-    time_horizon = validate_horizon(payload.get("T", 3), system)
+    time_horizon = validate_horizon(payload.get("T", 1 if system == "continuous" else 3), system)
 
     x0_values = vector("x0", np.zeros(size))
     xf_values = vector("xf", np.zeros(size))
@@ -414,7 +421,7 @@ def default_store(adjacency: np.ndarray) -> dict:
             for node_id, x0, xf in zip(ids, rng.random(len(ids)), rng.random(len(ids)))
         ],
         "c": 1.0,
-        "T": 3,
+        "T": 1,
         "rho": 1.0,
         "system": "continuous",
     }

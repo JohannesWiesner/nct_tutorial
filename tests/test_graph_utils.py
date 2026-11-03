@@ -42,10 +42,13 @@ class ElementTests(unittest.TestCase):
         modified = copy.deepcopy(self.elements)
         modified["edges"][0]["data"]["weight"] = 9
         self.assertFalse(same_graph_data(self.elements, modified))
+        self.assertFalse(same_graph_data(self.elements, modified, ignore_node_roles=True))
         for flag in ("controller", "constrain"):
             modified = copy.deepcopy(self.elements)
             modified["nodes"][0]["data"][flag] = False
             self.assertFalse(same_graph_data(self.elements, modified))
+            self.assertTrue(same_graph_data(self.elements, modified, ignore_node_roles=True))
+            self.assertTrue(self.elements["nodes"][0]["data"][flag])
         self.assertFalse(same_graph_data(self.elements, delete_nodes(self.elements, ["1"])))
         self.assertFalse(same_graph_data(self.elements, None))
 
@@ -92,6 +95,16 @@ class ConfigurationTests(unittest.TestCase):
     def test_continuous_upload_preserves_fractional_duration(self):
         result = validate_configuration({"A": [[0, 1], [1, 0]], "system": "continuous", "T": 1.25})
         self.assertEqual((result["system"], result["T"]), ("continuous", 1.25))
+
+    def test_default_horizon_matches_system_and_preserves_legacy_uploads(self):
+        for system, expected in (("continuous", 1), ("discrete", 3), (None, 3)):
+            payload = {"A": [[0, 1], [1, 0]]}
+            if system is not None:
+                payload["system"] = system
+            with self.subTest(system=system):
+                self.assertEqual(validate_configuration(payload)["T"], expected)
+                payload["T"] = 4
+                self.assertEqual(validate_configuration(payload)["T"], 4)
 
     def test_upload_rejects_invalid_time_system_or_duration(self):
         for system, duration in (("other", 3), ("discrete", 1.5), ("continuous", 0),
