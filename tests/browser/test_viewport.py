@@ -45,10 +45,22 @@ class ViewportTests(unittest.TestCase):
         self.page.on("pageerror", lambda error: self.errors.append(str(error)))
         self.page.goto(self.url, wait_until="networkidle")
         self.page.wait_for_function("window.cy && window.cy.nodes().length === 9")
+        self.wait_arranged()
         self.assert_nodes_visible(all_nodes=True)
 
     def tearDown(self):
         self.assertEqual(self.errors, [])
+
+    def wait_arranged(self):
+        self.page.wait_for_function(
+            """() => window.dash_clientside.nctArrangement
+                && !window.dash_clientside.nctArrangement.busy(window.cy)
+                && document.querySelector('#layout-status').textContent === 'Graph arranged.'"""
+        )
+
+    def request_arrangement(self):
+        self.page.locator("#arrange-graph").click()
+        self.page.wait_for_function("window.dash_clientside.nctArrangement.busy(window.cy)")
 
     def assert_nodes_visible(self, all_nodes=False):
         self.page.wait_for_function(
@@ -79,8 +91,78 @@ class ViewportTests(unittest.TestCase):
         self.page.wait_for_function(
             "count => window.cy.nodes().length === count", arg=len(adjacency)
         )
-        # Cytoscape debounces its automatic layout refresh after add/remove.
-        self.page.wait_for_timeout(250)
+        self.wait_arranged()
+
+    def test_arrange_recovers_messy_graph_preserving_data_and_selection(self):
+        before = self.page.evaluate(
+            """() => {
+                const cy = window.cy;
+                cy.nodes()[0].select();
+                cy.edges()[0].select();
+                cy.nodes().forEach((n, i) => n.position({x: i * 100000, y: 0}));
+                return {data: cy.elements().map(e => e.data()),
+                    selected: cy.$(':selected').map(e => e.id())};
+            }"""
+        )
+        self.request_arrangement()
+        self.wait_arranged()
+        after = self.page.evaluate(
+            """() => ({data: window.cy.elements().map(e => e.data()),
+                selected: window.cy.$(':selected').map(e => e.id())})"""
+        )
+        self.assertEqual(after, before)
+        self.assertLess(self.page.evaluate("window.cy.nodes().boundingBox().w"), 5000)
+        self.assertTrue(self.page.evaluate(
+            """() => {
+                const boxes = window.cy.nodes().map(n => n.boundingBox());
+                return boxes.every((a, i) => boxes.slice(i + 1).every(b =>
+                    a.x2 <= b.x1 || a.x1 >= b.x2 || a.y2 <= b.y1 || a.y1 >= b.y2));
+            }"""
+        ))
+        self.assert_nodes_visible(all_nodes=True)
+
+    def test_wheel_cancels_animation_without_late_fit(self):
+        bounds = self.page.locator("#cytoscape").bounding_box()
+        self.request_arrangement()
+        self.page.mouse.move(bounds["x"] + bounds["width"] / 2, bounds["y"] + 200)
+        self.page.mouse.wheel(0, -50)
+        self.page.wait_for_function(
+            "document.querySelector('#layout-status').textContent === 'Arrangement stopped.'"
+        )
+        self.page.wait_for_timeout(100)
+        snapshot = """() => ({positions: window.cy.nodes().map(n => n.position()),
+            pan: window.cy.pan(), zoom: window.cy.zoom()})"""
+        before = self.page.evaluate(snapshot)
+        self.page.wait_for_timeout(500)
+        self.assertEqual(self.page.evaluate(snapshot), before)
+
+    def test_repeated_arrangement_upload_and_resize_leave_only_current_graph(self):
+        self.request_arrangement()
+        self.request_arrangement()
+        self.upload([[0, 1, 0], [1, 0, 1], [0, 1, 0]])
+        for width in (320, 1800, 480):
+            self.request_arrangement()
+            self.page.set_viewport_size({"width": width, "height": 900})
+            self.wait_arranged()
+            self.assertEqual(self.page.evaluate("window.cy.nodes().map(n => n.id())"), ["0", "1", "2"])
+            self.assertEqual(self.page.evaluate("window.cy.edges().length"), 2)
+            self.assert_nodes_visible(all_nodes=True)
+
+    def test_weight_edit_preserves_finished_arrangement(self):
+        self.request_arrangement()
+        self.wait_arranged()
+        before = self.page.evaluate(
+            """() => {
+                window.cy.edges()[0].select();
+                return window.cy.nodes().map(n => n.position());
+            }"""
+        )
+        self.page.wait_for_timeout(200)
+        self.page.locator("#edge-weight").fill("4.5")
+        self.page.locator("#set-edge-weight").click()
+        self.page.wait_for_function("window.cy.edges()[0].data('weight') === 4.5")
+        self.page.wait_for_timeout(500)
+        self.assertEqual(self.page.evaluate("window.cy.nodes().map(n => n.position())"), before)
 
     def test_large_pan_recovers_graph(self):
         for x, y in ((-100000, 0), (100000, 0), (0, -100000), (0, 100000)):
@@ -189,6 +271,8 @@ class ViewportTests(unittest.TestCase):
         self.assertEqual(self.page.evaluate("window.stateSwapLayoutRuns"), 0)
 
     def test_role_toggles_preserve_positions_selection_viewport_and_layout(self):
+        self.request_arrangement()
+        self.wait_arranged()
         before = self.page.evaluate(
             """() => {
                 const cy = window.cy;

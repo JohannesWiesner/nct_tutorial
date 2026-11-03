@@ -60,6 +60,7 @@ DEFAULT_ADJACENCY = np.array(
 
 
 initial = default_store(DEFAULT_ADJACENCY)
+cyto.load_extra_layouts()
 app = Dash(
     __name__, external_stylesheets=[dbc.themes.BOOTSTRAP],
     assets_folder=str(Path(__file__).resolve().parent.parent / "assets"),
@@ -77,7 +78,8 @@ app.layout = dbc.Container(
                     [
                         cyto.Cytoscape(
                             id="cytoscape",
-                            layout={"name": "cose", "animate": False, "fit": True, "padding": 32},
+                            layout={"name": "preset", "fit": False},
+                            autoRefreshLayout=False,
                             elements=initial["elements"],
                             stylesheet=stylesheet_for(initial["elements"]),
                             style={
@@ -99,11 +101,20 @@ app.layout = dbc.Container(
                                             title="Fit all nodes inside the canvas",
                                         ),
                                         dbc.Button(
+                                            "Arrange graph", id="arrange-graph", n_clicks=0,
+                                            color="secondary", outline=True,
+                                            title="Rearrange nodes, then fit the graph",
+                                        ),
+                                        dbc.Button(
                                             "Plot trajectories and energy", id="plot",
                                             color="primary", n_clicks=0,
                                         ),
                                     ],
                                     className="d-flex flex-wrap gap-2",
+                                ),
+                                html.Div(
+                                    id="layout-status", className="mt-2 small text-muted",
+                                    role="status", **{"aria-live": "polite"},
                                 ),
                                 html.Div(id="plot-status", className="mt-2 text-danger"),
                             ],
@@ -235,6 +246,8 @@ app.clientside_callback(
     Input("cytoscape", "extent"),
     Input("cytoscape", "elements"),
     Input("fit-graph", "n_clicks"),
+    Input("arrange-graph", "n_clicks"),
+    Input("upload-data", "contents"),
 )
 
 
@@ -365,7 +378,15 @@ def render_network(store, current_elements):
     """
     elements = stylesheet = metrics = no_update
     if not same_graph_data(store["elements"], current_elements, ignore_node_roles=True):
-        elements = store["elements"]
+        elements = split_elements(store["elements"])
+        live_ids = {node["data"]["id"]
+                    for node in split_elements(current_elements)["nodes"]}
+        # A server callback may have read positions before a layout or drag.
+        # Omit existing coordinates so React preserves the live positions.
+        # New nodes still receive their initial position from the store.
+        for node in elements["nodes"]:
+            if node["data"]["id"] in live_ids:
+                node.pop("position", None)
         stylesheet = stylesheet_for(elements)
         adjacency, _, _, _ = matrices_from_elements(elements)
         metrics = metric_cards(topology_metrics(adjacency))
