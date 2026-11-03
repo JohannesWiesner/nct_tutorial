@@ -48,6 +48,19 @@ class ViewTests(unittest.TestCase):
 
 
 class AppTests(unittest.TestCase):
+    def test_arrangement_owns_layout_and_loads_required_assets(self):
+        client = app.server.test_client()
+        nodes = list(components(client.get("/_dash-layout").get_json()))
+        props = {node["props"]["id"]: node["props"]
+                 for node in nodes if "id" in node["props"]}
+        self.assertEqual(props["cytoscape"]["layout"], {"name": "preset", "fit": False})
+        self.assertFalse(props["cytoscape"]["autoRefreshLayout"])
+        self.assertEqual(props["arrange-graph"]["children"], "Arrange graph")
+        self.assertEqual(props["layout-status"]["role"], "status")
+        page = client.get("/").get_data(as_text=True)
+        self.assertIn("arrangement.js", page)
+        self.assertIn("dash_cytoscape_extra", page)
+
     def callback_response(self, output, values, changed):
         """Exercise a registered Dash callback through its HTTP endpoint."""
         key = next(key for key in app.callback_map if output in key)
@@ -271,14 +284,20 @@ class AppTests(unittest.TestCase):
             if change == "weight":
                 modified["elements"]["edges"][0]["data"]["weight"] = 4.5
             else:
-                modified["elements"]["nodes"].append({"data": {"id": "20", "label": "20"}})
+                modified["elements"]["nodes"].append({
+                    "data": {"id": "20", "label": "20"}, "position": {"x": 20, "y": 30},
+                })
             with self.subTest(change=change):
                 rendered = self.callback_response(
                     "cytoscape.elements",
                     {"network-store.data": modified, "cytoscape.elements": initial["elements"]},
                     "network-store.data",
                 )
-                self.assertEqual(rendered["cytoscape"]["elements"], modified["elements"])
+                expected = copy.deepcopy(modified["elements"])
+                for node in expected["nodes"]:
+                    if node["data"]["id"] != "20":
+                        node.pop("position", None)
+                self.assertEqual(rendered["cytoscape"]["elements"], expected)
                 self.assertIn("stylesheet", rendered["cytoscape"])
                 self.assertIn("topology-metrics", rendered)
 
