@@ -89,6 +89,7 @@ class AppTests(unittest.TestCase):
                  for node in nodes if "id" in node["props"]}
         self.assertEqual(initial["system"], "continuous")
         self.assertEqual(props["time-system"]["value"], "continuous")
+        self.assertEqual(props["T"]["value"], 1)
         self.assertEqual(props["T-label"]["children"], "Time duration (T)")
         self.assertEqual((props["T"]["min"], props["T"]["step"]), (0.001, 0.001))
         result = update_figures(
@@ -264,13 +265,13 @@ class AppTests(unittest.TestCase):
         self.assertEqual(rendered["states-table"]["data"], switched["states"])
         self.assertEqual(rendered["c"]["value"], 2)
 
-    def test_graph_data_changes_still_refresh_elements_styles_and_metrics(self):
-        for change in ("weight", "controller", "constrain"):
+    def test_topology_and_weight_changes_refresh_elements_styles_and_metrics(self):
+        for change in ("weight", "node"):
             modified = copy.deepcopy(initial)
             if change == "weight":
                 modified["elements"]["edges"][0]["data"]["weight"] = 4.5
             else:
-                modified["elements"]["nodes"][0]["data"][change] = False
+                modified["elements"]["nodes"].append({"data": {"id": "20", "label": "20"}})
             with self.subTest(change=change):
                 rendered = self.callback_response(
                     "cytoscape.elements",
@@ -280,6 +281,42 @@ class AppTests(unittest.TestCase):
                 self.assertEqual(rendered["cytoscape"]["elements"], modified["elements"])
                 self.assertIn("stylesheet", rendered["cytoscape"])
                 self.assertIn("topology-metrics", rendered)
+
+    def test_role_edits_patch_only_flags_for_grouped_or_reordered_flat_elements(self):
+        for grouped in (True, False):
+            modified = copy.deepcopy(initial)
+            modified["elements"]["nodes"][0]["data"]["controller"] = False
+            modified["elements"]["nodes"][1]["data"]["constrain"] = False
+            current = copy.deepcopy(initial["elements"])
+            current["nodes"][0]["position"] = {"x": 42, "y": -31}
+            current["nodes"][0]["selected"] = True
+            if not grouped:
+                current = list(reversed(current["edges"] + current["nodes"]))
+            with self.subTest(grouped=grouped):
+                rendered = self.callback_response(
+                    "cytoscape.elements",
+                    {"network-store.data": modified, "cytoscape.elements": current},
+                    "network-store.data",
+                )
+                self.assertNotIn("stylesheet", rendered["cytoscape"])
+                self.assertNotIn("topology-metrics", rendered)
+                operations = rendered["cytoscape"]["elements"]["operations"]
+                self.assertEqual(len(operations), 2)
+                for operation in operations:
+                    self.assertEqual(operation["operation"], "Assign")
+                    path = operation["location"]
+                    self.assertIn(path[-1], ("controller", "constrain"))
+                    self.assertEqual(path[-2], "data")
+                    target = current
+                    for key in path[:-1]:
+                        target = target[key]
+                    target[path[-1]] = operation["params"]["value"]
+                nodes = current["nodes"] if grouped else current
+                actual = {n["data"]["id"]: n for n in nodes if "source" not in n["data"]}
+                self.assertEqual(actual["0"]["position"], {"x": 42, "y": -31})
+                self.assertTrue(actual["0"]["selected"])
+                for node in modified["elements"]["nodes"]:
+                    self.assertEqual(actual[node["data"]["id"]]["data"], node["data"])
 
     def test_fractional_duration_is_rejected_after_switch_to_discrete(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "discrete")

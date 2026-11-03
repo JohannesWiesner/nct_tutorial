@@ -8,9 +8,11 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 
 - Add and remove nodes from the adjacency matrix
 - Connect selected nodes, remove selected edges, and edit edge weights.
-- Select controller and constrained nodes.
+- Select controller and state-penalty nodes. Blue lightning badges on the upper-left rim indicate control input (B); amber targets on the upper-right rim indicate state penalty (S). Node numbers stay centered, and a separate purple outline indicates selection.
 - Edit or swap initial and target states while preserving the graph layout.
-- Start in continuous time, or choose discrete time, with matching dynamics and energy calculations.
+- Start in continuous time with duration T = 1, or choose discrete time, with matching dynamics and energy calculations.
+- Read node IDs without edge-label clutter; edge widths still encode their weights.
+- Edit states, parameters, and the network in controls that wrap to fit the screen.
 - Upload a complete `A`, `B`, `S`, `c`, `T`, `x0`, `xf`, `rho`, and `system` configuration.
 - Inspect density, degree, strength, and clustering as the topology changes.
 - Compare minimum-energy trajectories in the lower-left plot and optimal-control trajectories in the lower-right plot for the selected time system.
@@ -38,7 +40,7 @@ Open <http://localhost:8050>. The container uses Miniconda and serves the app wi
 
 ## Upload format
 
-Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c`, `T`, and `rho` are optional and default to `1`, `3`, and `1` respectively.
+Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c` and `rho` default to `1`. If omitted, `T` defaults to `1` for continuous time and `3` for discrete time; an explicitly supplied `T` is preserved.
 
 `system` is optional and accepts `"discrete"` or `"continuous"`.
 Discrete `T` must be a positive integer; continuous `T` is a positive duration
@@ -62,3 +64,28 @@ the time-system selector and the horizon label.
 ```
 
 See [`example-config.json`](example-config.json) for a ready-to-upload example.
+
+## Checks
+
+Run the Python model, view, and callback regressions from the repository root:
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+The optional JavaScript checks use the Cytoscape and React wrapper versions
+bundled with Dash Cytoscape 1.0.2. They verify badge styles, role updates,
+selection, and viewport fitting with the real graph implementation:
+
+```bash
+npm install --no-save --package-lock=false cytoscape@3.28.1 react-cytoscapejs@2.0.0
+node --test tests/test_*.cjs
+```
+
+To check dragging, role toggles, editable controls, and responsive widths in a browser:
+
+```bash
+python -m pip install playwright
+python -m playwright install chromium
+python -m unittest discover -s tests/browser -v
+```

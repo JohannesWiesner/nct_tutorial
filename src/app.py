@@ -10,7 +10,7 @@ from pathlib import Path
 
 import numpy as np
 import plotly.graph_objects as go
-from dash import ClientsideFunction, Dash, Input, Output, State, ctx, dash_table, dcc, html, no_update
+from dash import ClientsideFunction, Dash, Input, Output, Patch, State, ctx, dash_table, dcc, html, no_update
 import dash_bootstrap_components as dbc
 import dash_cytoscape as cyto
 
@@ -23,6 +23,7 @@ from .graph_utils import (
     merge_state_edits,
     node_ids,
     same_graph_data,
+    split_elements,
     states_from_rows,
     toggle_edges,
     toggle_node_flag,
@@ -35,6 +36,7 @@ from .view_utils import (
     energy_figure,
     horizon_control_settings,
     metric_cards,
+    node_role_legend,
     parameter_controls,
     stylesheet_for,
     trajectory_figure,
@@ -86,6 +88,7 @@ app.layout = dbc.Container(
                             maxZoom=4,
                             responsive=True,
                         ),
+                        node_role_legend(),
                         html.Section(
                             [
                                 html.Div(
@@ -124,6 +127,12 @@ app.layout = dbc.Container(
                                     ],
                                     data=initial["states"],
                                     editable=True,
+                                    style_table={"width": "100%"},
+                                    style_cell={
+                                        "width": "33.333%", "minWidth": 0,
+                                        "whiteSpace": "normal", "height": "auto",
+                                        "overflowWrap": "anywhere",
+                                    },
                                 ),
                                 dbc.Button(
                                     "Switch x0 / xf", id="switch-states",
@@ -149,32 +158,28 @@ app.layout = dbc.Container(
                                                 dbc.Button("Add node", id="add-node", n_clicks=0),
                                                 dbc.Button("Delete selected", id="delete-node", color="danger", n_clicks=0),
                                             ],
-                                            className="flex-shrink-0",
                                         ),
                                         dbc.Button(
                                             "Connect / disconnect", id="toggle-edge", n_clicks=0,
-                                            className="flex-shrink-0",
                                         ),
                                         dbc.Button(
                                             "Toggle controller", id="toggle-controller", n_clicks=0,
-                                            className="flex-shrink-0",
                                         ),
                                         dbc.Button(
                                             "Toggle constraint", id="toggle-constraint", n_clicks=0,
-                                            className="flex-shrink-0",
                                         ),
                                         dbc.InputGroup(
                                             [
+                                                html.Label("Edge weight", htmlFor="edge-weight", className="visually-hidden"),
                                                 dbc.Input(
                                                     id="edge-weight", type="number", min=0.000001, value=1,
-                                                    style={"width": "6rem", "flex": "0 0 6rem"},
                                                 ),
                                                 dbc.Button("Set selected edge weight", id="set-edge-weight", n_clicks=0),
                                             ],
-                                            className="w-auto flex-nowrap flex-shrink-0",
+                                            className="edge-weight-control",
                                         ),
                                     ],
-                                    className="d-flex flex-nowrap gap-2 text-nowrap overflow-auto pb-2 mb-2",
+                                    className="network-toolbar mb-2",
                                     role="group", **{"aria-label": "Network editing controls"},
                                 ),
                                 dcc.Upload(
@@ -355,15 +360,32 @@ def update_network(
 def render_network(store, current_elements):
     """Update graph props only when node/edge data changed.
 
-    State swaps and parameter edits preserve Cytoscape's current positions,
-    selection, and viewport by leaving its elements and stylesheet untouched.
+    State swaps and parameter edits leave graph props untouched. Role changes
+    patch only B/S data, preserving live positions, selection, and viewport.
     """
     elements = stylesheet = metrics = no_update
-    if not same_graph_data(store["elements"], current_elements):
+    if not same_graph_data(store["elements"], current_elements, ignore_node_roles=True):
         elements = store["elements"]
         stylesheet = stylesheet_for(elements)
         adjacency, _, _, _ = matrices_from_elements(elements)
         metrics = metric_cards(topology_metrics(adjacency))
+    elif not same_graph_data(store["elements"], current_elements):
+        # Dash Cytoscape emits a flat list after dragging, even when initialized
+        # with grouped elements. Patch the current representation by node ID.
+        roles = {node["data"]["id"]: node["data"]
+                 for node in split_elements(store["elements"])["nodes"]}
+        grouped = isinstance(current_elements, dict)
+        current_nodes = current_elements["nodes"] if grouped else current_elements
+        elements = Patch()
+        for index, node in enumerate(current_nodes):
+            data = node["data"]
+            if "source" in data:
+                continue
+            target = elements["nodes"][index] if grouped else elements[index]
+            for flag in ("controller", "constrain"):
+                value = roles[data["id"]][flag]
+                if data.get(flag) != value:
+                    target["data"][flag] = value
     return (
         elements,
         stylesheet,
