@@ -4,6 +4,12 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 
 ![Application preview](preview.png)
 
+## Web Application
+
+You can access the application at the following link:
+
+[![Live Demo](https://img.shields.io/badge/Live-Demo-brightgreen)](https://network-control-theory-tutorial.onrender.com/)
+
 ## Features
 
 - Add and remove nodes from the adjacency matrix
@@ -15,27 +21,7 @@ An interactive Dash application for learning [Network Control Theory](https://gi
 - Compare minimum-energy trajectories and optimal-control trajectories for the selected time system.
 - Inspect uncontrolled trajectories and aggregate energy per node for the selected time system.
 
-## Run locally
-
-```bash
-conda env create -f environment.yml
-conda activate nct-tutorial
-python -m src.app
-```
-
-Run these commands from the repository root, then open <http://localhost:8050>.
-For Gunicorn, use `gunicorn --bind 0.0.0.0:8050 src.app:server`.
-
-## Run with Docker
-
-```bash
-docker build -t nct-tutorial .
-docker run --rm -p 8050:8050 nct-tutorial
-```
-
-Open <http://localhost:8050>. The container uses Miniconda and serves the app with Gunicorn.
-
-## Upload format
+## Upload format for custom input data
 
 Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c` and `rho` default to `1`. If omitted, `T` defaults to `1` for continuous time and `3` for discrete time; an explicitly supplied `T` is preserved.
 
@@ -61,3 +47,25 @@ the time-system selector and the horizon label.
 ```
 
 See [`example-config.json`](example-config.json) for a ready-to-upload example.
+
+## Run locally
+
+```bash
+conda env create -f environment.yml
+conda activate nct-tutorial
+python -m src.app
+```
+
+Run these commands from the repository root, then open <http://localhost:8050>.
+For Gunicorn, use `gunicorn --bind 0.0.0.0:8050 src.app:server`.
+
+## Run with Docker
+
+```bash
+docker build -t nct-tutorial .
+docker run --rm -p 8050:8050 nct-tutorial
+```
+
+Open <http://localhost:8050>. The container uses Miniconda and serves the app with Gunicorn.
+
+
