@@ -108,17 +108,12 @@ class ControlTests(unittest.TestCase):
         result = self.solve(constraint=np.zeros((2, 2)), rho=3)
         np.testing.assert_allclose(result.minimum.inputs, result.optimal.inputs, atol=1e-10)
 
-    def test_one_step_solution_preserves_supported_horizon(self):
-        result = self.solve(time_horizon=1)
-        expected = self.xf - result.normalized_adjacency @ self.x0
-        np.testing.assert_allclose(result.minimum.inputs, expected.reshape(1, -1))
-        np.testing.assert_allclose(result.minimum.energy, expected ** 2)
-        np.testing.assert_allclose(result.optimal.inputs, result.minimum.inputs)
-        self.assertEqual(result.uncontrolled.shape, (2, 2))
-
-    def test_one_step_rejects_an_unreachable_target(self):
-        with self.assertRaisesRegex(ValueError, "unreachable"):
-            self.solve(control=np.zeros((2, 2)), time_horizon=1)
+    def test_discrete_horizon_boundary(self):
+        with self.assertRaisesRegex(ValueError, "at least 2"):
+            self.solve(time_horizon=1)
+        result = self.solve(time_horizon=2)
+        np.testing.assert_array_equal(result.state_times, [0, 1, 2])
+        np.testing.assert_array_equal(result.input_times, [0, 1])
 
     def test_partial_controller_set_reaches_target_over_multiple_steps(self):
         control = np.diag([1.0, 0.0])

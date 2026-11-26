@@ -28,7 +28,7 @@ def validate_horizon(value: float, system: str = "discrete") -> int | float:
     the last plotted sample and the solver's target time coincide.
     """
     validate_time_system(system)
-    message = ("T must be a positive integer for discrete time" if system == "discrete"
+    message = ("T must be an integer of at least 2 for discrete time" if system == "discrete"
                else "T must be a positive duration in multiples of 0.001 for continuous time")
     try:
         number = float(value)
@@ -37,7 +37,7 @@ def validate_horizon(value: float, system: str = "discrete") -> int | float:
     if isinstance(value, (bool, np.bool_)) or not np.isfinite(number) or number <= 0:
         raise ValueError(message)
     if system == "discrete":
-        if not number.is_integer():
+        if number < 2 or not number.is_integer():
             raise ValueError(message)
         return int(number)
     steps = number / CONTINUOUS_TIME_STEP

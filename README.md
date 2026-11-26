@@ -26,7 +26,7 @@ You can access the application at the following link:
 Use a UTF-8 JSON file. `A` is required. `B` and `S` are optional diagonal matrices and default to identity matrices. `x0` and `xf` are optional vectors and default to zero. `c` and `rho` default to `1`. If omitted, `T` defaults to `1` for continuous time and `3` for discrete time; an explicitly supplied `T` is preserved.
 
 `system` is optional and accepts `"discrete"` or `"continuous"`.
-Discrete `T` must be a positive integer; continuous `T` is a positive duration
+Discrete `T` must be an integer of at least 2; continuous `T` is a positive duration
 in increments of `0.001`, for example `0.5` or `1.25`. Older JSON files without
 `system` continue to use discrete time for compatibility, even though new app
 sessions start in continuous time. Uploading a configuration also updates
