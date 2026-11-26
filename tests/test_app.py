@@ -143,7 +143,7 @@ class AppTests(unittest.TestCase):
                     "T-label.children", {"time-system.value": system}, "time-system.value"
                 )
                 self.assertEqual(response["T-label"]["children"], label)
-                self.assertEqual(response["T"], {"min": step, "step": step})
+                self.assertEqual(response["T"], {"min": 2 if system == "discrete" else step, "step": step})
 
     def test_continuous_upload_and_network_edit_preserve_selected_system(self):
         payload = {"A": [[0, 1], [1, 0]], "system": "continuous", "T": 1.25,
@@ -245,6 +245,8 @@ class AppTests(unittest.TestCase):
             figures = update_figures(1, store, store["states"], 1, horizon, 0.1, system)
             for figure, solution in ((figures[1], model.minimum), (figures[2], model.optimal)):
                 with self.subTest(system=system, title=figure.layout.title.text):
+                    for axis in figure.select_xaxes():
+                        self.assertEqual(axis.dtick, 1 if system == "discrete" else None)
                     self.assertEqual(len(figure.data), 4)
                     for trace in figure.data:
                         node = int(trace.name)
@@ -340,7 +342,7 @@ class AppTests(unittest.TestCase):
     def test_fractional_duration_is_rejected_after_switch_to_discrete(self):
         result = update_figures(1, initial, initial["states"], 1, 0.5, 1, "discrete")
         self.assertTrue(all(value is no_update for value in result[:4]))
-        self.assertIn("positive integer for discrete time", result[-1])
+        self.assertIn("integer of at least 2 for discrete time", result[-1])
 
     def test_viewport_asset_is_served_from_src_application(self):
         client = app.server.test_client()

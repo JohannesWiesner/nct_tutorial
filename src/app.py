@@ -229,7 +229,7 @@ app.layout = dbc.Container(
         ),
         html.Section(
             [
-                html.H3("Topology measures"),
+                html.H3("Topological Measures"),
                 dbc.Row(metric_cards(topology_metrics(DEFAULT_ADJACENCY)), id="topology-metrics", className="g-2"),
             ],
             className="border rounded p-3 mt-4",

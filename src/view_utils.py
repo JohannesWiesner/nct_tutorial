@@ -162,6 +162,8 @@ def trajectory_figure(
     figure = px.line(tidy, x="t", y="Value", color="Node", title=title)
     figure.update_layout(title_x=0.5)
     figure.update_xaxes(title_text="Time step" if system == "discrete" else "Time (model units)")
+    if system == "discrete":
+        figure.update_xaxes(tick0=0, dtick=max(1, (len(trajectory) + 8) // 10))
     return figure
 
 
@@ -201,6 +203,8 @@ def control_figure(
         title_text="Time step" if system == "discrete" else "Time (model units)",
         row=1, col=1,
     )
+    if system == "discrete":
+        figure.update_xaxes(tick0=0, dtick=max(1, (len(states) + 8) // 10))
     return figure
 
 
@@ -255,7 +259,7 @@ def horizon_control_settings(system: str) -> tuple[str, float, float, str]:
             "Time duration (T)", CONTINUOUS_TIME_STEP, CONTINUOUS_TIME_STEP,
             "Positive duration in model time units, in increments of 0.001.",
         )
-    return "Time steps (T)", 1, 1, "Positive integer number of transitions."
+    return "Time steps (T)", 2, 1, "Enter a whole number of transitions (at least 2)."
 
 
 def parameter_controls(parameters: dict) -> html.Div:

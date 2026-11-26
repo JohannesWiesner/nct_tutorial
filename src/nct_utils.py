@@ -140,7 +140,13 @@ def state_trajectory(
     """
     validate_time_system(system)
     matrix = _square_matrix(adjacency, "A")
-    count = validate_horizon(time_horizon)
+    try:
+        count = int(time_horizon)
+        valid = float(time_horizon) == count and count >= 1
+    except (TypeError, ValueError, OverflowError):
+        valid = False
+    if not valid or isinstance(time_horizon, (bool, np.bool_)):
+        raise ValueError("Sample count must be a positive integer")
     state = _state_vector(initial_state, len(matrix), "x0")
     transition = matrix if system == "discrete" else expm(matrix * CONTINUOUS_TIME_STEP)
     trajectory = np.zeros((count, len(matrix)))
@@ -176,14 +182,11 @@ def compute_control_results(
 
     A, B (control), and S (constraint) are N-by-N arrays in the same node
     order as the two state vectors. c controls normalization for system.
-    T is a positive integer for discrete time or a positive duration in
+    T is an integer of at least 2 for discrete time or a positive duration in
     0.001 increments for continuous time. Minimum energy uses S=0. Optimal
     control uses the supplied S and rho to penalize state magnitude and input cost.
 
-    nctpy solves discrete horizons of two or more steps. For discrete T=1,
-    solve B u = xf-A x0 directly: fixed endpoints leave no intermediate
-    state cost, so minimum and optimal inputs coincide. An unreachable target raises
-    ValueError. Solver residuals are retained in each ControlSolution.
+    Solver residuals are retained in each ControlSolution.
     """
     matrix = _square_matrix(adjacency, "A")
     size = len(matrix)
@@ -200,22 +203,11 @@ def compute_control_results(
     weight = _positive_number(rho, "rho")
     normalized = matrix_normalization(matrix, system=system, c=normalization)
 
-    if system == "discrete" and horizon == 1:
-        required_change = xf - normalized @ x0
-        inputs = np.linalg.lstsq(B, required_change, rcond=None)[0]
-        residual = float(np.linalg.norm(B @ inputs - required_change))
-        if not np.allclose(B @ inputs, required_change, rtol=1e-7, atol=1e-9):
-            raise ValueError("The target state is unreachable in one step with these controllers")
-        minimum = _solution(
-            np.vstack((x0, xf)), inputs.reshape(1, -1), (residual, residual), system=system
-        )
-        optimal = minimum
-    else:
-        arguments = dict(A_norm=normalized, T=horizon, B=B, x0=x0, xf=xf, system=system)
-        minimum = _solution(
-            *get_control_inputs(**arguments, rho=1.0, S=np.zeros_like(S)), system=system
-        )
-        optimal = _solution(*get_control_inputs(**arguments, rho=weight, S=S), system=system)
+    arguments = dict(A_norm=normalized, T=horizon, B=B, x0=x0, xf=xf, system=system)
+    minimum = _solution(
+        *get_control_inputs(**arguments, rho=1.0, S=np.zeros_like(S)), system=system
+    )
+    optimal = _solution(*get_control_inputs(**arguments, rho=weight, S=S), system=system)
 
     step = 1 if system == "discrete" else CONTINUOUS_TIME_STEP
     state_times = np.arange(len(minimum.states)) * step
